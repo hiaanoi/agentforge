@@ -1,0 +1,51 @@
+{
+  "registry_version": "1.0.0",
+  "generated_at": "2026-07-16T00:00:00+08:00",
+  "artifacts": [
+    {
+      "path": "evaluation/preflight/alternate_preflight_results.json",
+      "sha256": "374a41f58adcaecc2966c7f343c32985a888455c348c89c11f3d62a7edb976b0",
+      "size_bytes": 506
+    },
+    {
+      "path": "evaluation/preflight/build_assets.py",
+      "sha256": "6d46df52c55a94a992c3f756f05152358b02c7112cd88179d7a2f11e684304c8",
+      "size_bytes": 42313
+    },
+    {
+      "path": "evaluation/preflight/demo_preflight.json",
+      "sha256": "7cbd51d97f1c209a1848113e63b254a620ede9d428dd95a618727ece9f3a5694",
+      "size_bytes": 873
+    },
+    {
+      "path": "evaluation/preflight/difficulty_review.json",
+      "sha256": "88ab1619bb2c4ecaa46c2bd022f98e097b95489720a88c8c739333d807b6967d",
+      "size_bytes": 3006
+    },
+    {
+      "path": "evaluation/preflight/gate_summary.json",
+      "sha256": "bde7da838c000a225d768b4916e615789d0b9ccba93ae41c0fc755e565f56e9e",
+      "size_bytes": 1551
+    },
+    {
+      "path": "evaluation/preflight/preflight_schema.json",
+      "sha256": "4673dc22072a4a1adca173760aaff2156a3bc3a90e98705e5c47d4c89c79637e",
+      "size_bytes": 7612
+    },
+    {
+      "path": "evaluation/preflight/primary_preflight_matrix.csv",
+      "sha256": "941171f2c0865792b815c1dc8eb37f5ffb3d613990b7e431788e42f29429d9a7",
+      "size_bytes": 1926
+    },
+    {
+      "path": "evaluation/preflight/primary_preflight_results.json",
+      "sha256": "c16d6fc6400430a0da3e6e30d579237cbe149867b858ff81f6a249232bb0cc19",
+      "size_bytes": 93427
+    },
+    {
+      "path": "evaluation/preflight/replacement_recommendations.json",
+      "sha256": "070cd7ebfe14b99bfa5ec06acca7467827308b5f8018b55d27f00ea85cb68f62",
+      "size_bytes": 787
+    }
+  ]
+}

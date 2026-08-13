@@ -1,0 +1,295 @@
+{
+  "candidate_schema_version": "1.0.0",
+  "selection_status": "HUMAN_APPROVED_FOR_B2_PREFLIGHT",
+  "human_decision": {
+    "replacement_candidate_ids": [],
+    "main_demo_candidate_id": "self-durable-double-consumption",
+    "main_demo_backup_candidate_id": "self-terminal-state-cas",
+    "difficulty_mix_accepted": {
+      "BASIC": 6,
+      "ENGINEERING": 3,
+      "CHALLENGE": 1
+    },
+    "conditional_validation_strategy": "SOURCE_TIERED",
+    "next_phase": "M7_B2_0_PREFLIGHT"
+  },
+  "candidate_ids": [
+    "quixbugs-shortest-path-length",
+    "quixbugs-topological-ordering",
+    "bugsinpy-black-21",
+    "bugsinpy-pysnooper-3",
+    "bugsinpy-httpie-4",
+    "swebench-flask-5014",
+    "swebench-pytest-10051",
+    "self-durable-double-consumption",
+    "self-policy-priority-shadow",
+    "self-async-cancel-cleanup"
+  ],
+  "recommendations": [
+    {
+      "candidate_id": "quixbugs-shortest-path-length",
+      "recommendation_reason": "Score 85/100 with BASIC scope. The root fix is local, but graph state and hidden alternate routes require disciplined reasoning.",
+      "maximum_risk": "The upstream defect is one line and can become too obvious unless the fixture separates graph construction from relaxation.",
+      "required_adaptation": [
+        "Copy only the relevant MIT-licensed function, support type, and attribution into a small fixture.",
+        "Replace the benchmark import switch with visible and hidden fixed TestProfiles.",
+        "Keep the original defect semantics while adding non-example hidden inputs."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Expose one representative failure and preserve the function contract.",
+        "hidden": "Use disconnected graphs, stale heap entries, alternate route ordering, and equal-cost paths."
+      },
+      "license_and_provenance": {
+        "license": "MIT",
+        "license_verified": true,
+        "provenance_confidence": "HIGH"
+      },
+      "difficulty_basis": "The root fix is local, but graph state and hidden alternate routes require disciplined reasoning.",
+      "budget_profile": "BASIC",
+      "main_demo_recommendation": false,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    },
+    {
+      "candidate_id": "quixbugs-topological-ordering",
+      "recommendation_reason": "Score 84/100 with BASIC scope. The correction is small, while hidden DAG shapes prevent an example-specific patch.",
+      "maximum_risk": "Both recommended QuixBugs candidates are graph-oriented, reducing domain diversity.",
+      "required_adaptation": [
+        "Copy only the relevant MIT-licensed function, support type, and attribution into a small fixture.",
+        "Replace the benchmark import switch with visible and hidden fixed TestProfiles.",
+        "Keep the original defect semantics while adding non-example hidden inputs."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Expose one representative failure and preserve the function contract.",
+        "hidden": "Vary input order, use multiple roots, converging dependencies, isolated nodes, and assert edge-order properties."
+      },
+      "license_and_provenance": {
+        "license": "MIT",
+        "license_verified": true,
+        "provenance_confidence": "HIGH"
+      },
+      "difficulty_basis": "The correction is small, while hidden DAG shapes prevent an example-specific patch.",
+      "budget_profile": "BASIC",
+      "main_demo_recommendation": false,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    },
+    {
+      "candidate_id": "bugsinpy-black-21",
+      "recommendation_reason": "Score 84/100 with BASIC scope. The change is local, but the symptom appears downstream during diagnostic formatting on selected locales.",
+      "maximum_risk": "Cropping to a file helper may reduce formatter realism.",
+      "required_adaptation": [
+        "Extract only the diagnostic-file path from the old formatter, not Black's full dependency tree.",
+        "Preserve the Windows encoding failure with controlled locale-independent test doubles."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Retain one upstream regression behavior without exposing the repaired line.",
+        "hidden": "Use non-ASCII source text, mocked non-UTF default encodings, and reopen the result explicitly."
+      },
+      "license_and_provenance": {
+        "license": "MIT",
+        "license_verified": true,
+        "provenance_confidence": "HIGH"
+      },
+      "difficulty_basis": "The change is local, but the symptom appears downstream during diagnostic formatting on selected locales.",
+      "budget_profile": "BASIC",
+      "main_demo_recommendation": false,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    },
+    {
+      "candidate_id": "bugsinpy-pysnooper-3",
+      "recommendation_reason": "Score 82/100 with BASIC scope. The user symptom is clear, while locating the wrong closure variable remains a focused debugging task.",
+      "maximum_risk": "The original fix is a one-token variable change and may be too easy if the writer factory is directly visible.",
+      "required_adaptation": [
+        "Retain only a small tracer/writer boundary and its attribution.",
+        "Replace python_toolbox test helpers with standard-library temporary directories."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Retain one upstream regression behavior without exposing the repaired line.",
+        "hidden": "Exercise pathlib paths, strings, repeated appends, nested calls, and Unicode output."
+      },
+      "license_and_provenance": {
+        "license": "MIT",
+        "license_verified": true,
+        "provenance_confidence": "HIGH"
+      },
+      "difficulty_basis": "The user symptom is clear, while locating the wrong closure variable remains a focused debugging task.",
+      "budget_profile": "BASIC",
+      "main_demo_recommendation": false,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    },
+    {
+      "candidate_id": "bugsinpy-httpie-4",
+      "recommendation_reason": "Score 83/100 with BASIC scope. The patch is one line, but the failure requires recognizing a semantic change caused by copying a mapping.",
+      "maximum_risk": "The original test environment has a large, old HTTP dependency set.",
+      "required_adaptation": [
+        "Keep only local request/header rendering code and remove httpbin/network fixtures.",
+        "Pre-provision the exact header-mapping dependency in an immutable TestProfile."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Retain one upstream regression behavior without exposing the repaired line.",
+        "hidden": "Vary Host casing, duplicate logical keys, userinfo in URLs, ports, and unrelated headers without network calls."
+      },
+      "license_and_provenance": {
+        "license": "BSD-3-Clause",
+        "license_verified": true,
+        "provenance_confidence": "HIGH"
+      },
+      "difficulty_basis": "The patch is one line, but the failure requires recognizing a semantic change caused by copying a mapping.",
+      "budget_profile": "BASIC",
+      "main_demo_recommendation": false,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    },
+    {
+      "candidate_id": "swebench-flask-5014",
+      "recommendation_reason": "Score 89/100 with BASIC scope. The change is small and deterministic, with enough lifecycle context for hidden invariant tests.",
+      "maximum_risk": "The direct validation fix may be too obvious if the visible test calls only the constructor.",
+      "required_adaptation": [
+        "Crop the Blueprint constructor and minimal registration collaborators under BSD attribution.",
+        "Pre-provision dependencies and remove documentation/server/network test paths."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Adapt the official FAIL_TO_PASS regression into one visible behavior test.",
+        "hidden": "Cover empty versus whitespace names, non-string values, duplicate registration, nesting, and valid Unicode names."
+      },
+      "license_and_provenance": {
+        "license": "BSD-3-Clause",
+        "license_verified": true,
+        "provenance_confidence": "HIGH"
+      },
+      "difficulty_basis": "The change is small and deterministic, with enough lifecycle context for hidden invariant tests.",
+      "budget_profile": "BASIC",
+      "main_demo_recommendation": false,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    },
+    {
+      "candidate_id": "swebench-pytest-10051",
+      "recommendation_reason": "Score 92/100 with ENGINEERING scope. The repair is compact, but correct diagnosis requires lifecycle and aliasing reasoning across modules.",
+      "maximum_risk": "An over-aggressive crop can remove the aliasing relationship that causes the real defect.",
+      "required_adaptation": [
+        "Extract a small phase-aware capture package rather than pytest's full plugin framework.",
+        "Preserve reference identity and stage transitions in visible and hidden tests."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Adapt the official FAIL_TO_PASS regression into one visible behavior test.",
+        "hidden": "Clear during setup/call/teardown, clear twice, capture after clear, and ensure phases remain isolated."
+      },
+      "license_and_provenance": {
+        "license": "MIT",
+        "license_verified": true,
+        "provenance_confidence": "HIGH"
+      },
+      "difficulty_basis": "The repair is compact, but correct diagnosis requires lifecycle and aliasing reasoning across modules.",
+      "budget_profile": "ENGINEERING",
+      "main_demo_recommendation": false,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    },
+    {
+      "candidate_id": "self-durable-double-consumption",
+      "recommendation_reason": "Score 88/100 with ENGINEERING scope. The defect is only visible across a durable crash boundary and requires a coherent atomicity fix.",
+      "maximum_risk": "It may resemble AgentForge approval consumption if names, states, or tests are copied.",
+      "required_adaptation": [
+        "Author a new small multi-module package without copying AgentForge implementation or tests.",
+        "Inject exactly one defect and preserve a private reference fix outside the model workspace.",
+        "Bind visible and hidden tests to immutable TestProfiles."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Show one ordinary restart path and one command receipt without exposing the crash-window interleaving.",
+        "hidden": "Crash after effect/before cursor, restart twice, duplicate command IDs, stale receipts, and concurrent consumers."
+      },
+      "license_and_provenance": {
+        "license": "N/A - original design concept; code not yet authored",
+        "license_verified": true,
+        "provenance_confidence": "MEDIUM"
+      },
+      "difficulty_basis": "The defect is only visible across a durable crash boundary and requires a coherent atomicity fix.",
+      "budget_profile": "ENGINEERING",
+      "main_demo_recommendation": true,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    },
+    {
+      "candidate_id": "self-policy-priority-shadow",
+      "recommendation_reason": "Score 89/100 with ENGINEERING scope. The repair changes a cross-module ordering contract and must preserve deterministic explanations.",
+      "maximum_risk": "The domain overlaps AgentForge Policy Engine concepts.",
+      "required_adaptation": [
+        "Author a new small multi-module package without copying AgentForge implementation or tests.",
+        "Inject exactly one defect and preserve a private reference fix outside the model workspace.",
+        "Bind visible and hidden tests to immutable TestProfiles."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Expose a generic allow and one unrelated deny while keeping the decisive overlap hidden.",
+        "hidden": "Overlapping prefixes, equal priority, explicit deny, approval requirements, order permutations, and unknown resources."
+      },
+      "license_and_provenance": {
+        "license": "N/A - original design concept; code not yet authored",
+        "license_verified": true,
+        "provenance_confidence": "MEDIUM"
+      },
+      "difficulty_basis": "The repair changes a cross-module ordering contract and must preserve deterministic explanations.",
+      "budget_profile": "ENGINEERING",
+      "main_demo_recommendation": false,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    },
+    {
+      "candidate_id": "self-async-cancel-cleanup",
+      "recommendation_reason": "Score 86/100 with CHALLENGE scope. Correctness depends on several cancellation interleavings and resource ownership invariants.",
+      "maximum_risk": "Race-based tests can become flaky without explicit barriers.",
+      "required_adaptation": [
+        "Author a new small multi-module package without copying AgentForge implementation or tests.",
+        "Inject exactly one defect and preserve a private reference fix outside the model workspace.",
+        "Bind visible and hidden tests to immutable TestProfiles."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Show cancellation during one worker await and verify the top-level task ends.",
+        "hidden": "Cancel during lease acquisition, partial fan-out, child failure, repeated cancel, timeout, and post-cancel reuse."
+      },
+      "license_and_provenance": {
+        "license": "N/A - original design concept; code not yet authored",
+        "license_verified": true,
+        "provenance_confidence": "MEDIUM"
+      },
+      "difficulty_basis": "Correctness depends on several cancellation interleavings and resource ownership invariants.",
+      "budget_profile": "CHALLENGE",
+      "main_demo_recommendation": false,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    }
+  ]
+}

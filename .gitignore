@@ -1,0 +1,40 @@
+# Virtual environments
+.venv/
+
+# Downloaded wheel files
+downloads/
+.downloads/
+
+# Generated evaluator reports
+evaluation/results/
+
+# Dependency lock backups
+uv.lock.*.bak
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tmp/
+
+# Runtime databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Coverage and build artifacts
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Private real-model evaluation state
+.agentforge/

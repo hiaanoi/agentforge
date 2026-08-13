@@ -1,0 +1,228 @@
+{
+  "candidate_schema_version": "1.0.0",
+  "selection_status": "REGISTERED_ALTERNATES",
+  "candidate_ids": [
+    "quixbugs-flatten",
+    "bugsinpy-cookiecutter-2",
+    "bugsinpy-fastapi-3",
+    "swebench-requests-5414",
+    "swebench-pylint-6386",
+    "swebench-pytest-5840",
+    "self-terminal-state-cas",
+    "self-adapter-default-propagation"
+  ],
+  "recommendations": [
+    {
+      "candidate_id": "quixbugs-flatten",
+      "recommendation_reason": "Score 78/100 with BASIC scope. The upstream correction is obvious after one failing example; only careful adaptation could add evaluation value.",
+      "maximum_risk": "The raw defect is too close to a toy exercise.",
+      "required_adaptation": [
+        "Copy only the relevant MIT-licensed function, support type, and attribution into a small fixture.",
+        "Replace the benchmark import switch with visible and hidden fixed TestProfiles.",
+        "Keep the original defect semantics while adding non-example hidden inputs."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Expose one representative failure and preserve the function contract.",
+        "hidden": "Use empty lists, mixed depth, repeated values, non-list iterables, and lazy-consumption checks."
+      },
+      "license_and_provenance": {
+        "license": "MIT",
+        "license_verified": true,
+        "provenance_confidence": "HIGH"
+      },
+      "difficulty_basis": "The upstream correction is obvious after one failing example; only careful adaptation could add evaluation value.",
+      "budget_profile": "BASIC",
+      "main_demo_recommendation": false,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    },
+    {
+      "candidate_id": "bugsinpy-cookiecutter-2",
+      "recommendation_reason": "Score 80/100 with ENGINEERING scope. The fix changes a return contract and all consumers, but adaptation correctness is unresolved.",
+      "maximum_risk": "Removing actual script execution may alter the issue's integration semantics.",
+      "required_adaptation": [
+        "Replace real hook subprocess execution with a local recording dispatcher.",
+        "Define deterministic ordering explicitly instead of inheriting os.listdir ordering.",
+        "Retain only hook discovery/rendering modules and their BSD attribution."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Retain one upstream regression behavior without exposing the repaired line.",
+        "hidden": "Use mixed extensions, invalid hooks, no-hook cases, deterministic ordering, and mocked execution dispatch."
+      },
+      "license_and_provenance": {
+        "license": "BSD-3-Clause",
+        "license_verified": true,
+        "provenance_confidence": "HIGH"
+      },
+      "difficulty_basis": "The fix changes a return contract and all consumers, but adaptation correctness is unresolved.",
+      "budget_profile": "ENGINEERING",
+      "main_demo_recommendation": false,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    },
+    {
+      "candidate_id": "bugsinpy-fastapi-3",
+      "recommendation_reason": "Score 77/100 with ENGINEERING scope. Strong cross-module semantics, but environment adaptation dominates the repair itself.",
+      "maximum_risk": "Pydantic 1 versus 2 behavior can change the bug materially.",
+      "required_adaptation": [
+        "Decide whether to prebuild an isolated historical dependency environment or design a faithful small model protocol.",
+        "Exclude FastAPI networking and server code while preserving recursive response semantics."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Retain one upstream regression behavior without exposing the repaired line.",
+        "hidden": "Cover nested lists/dicts, aliases, unset/default fields, mixed scalar leaves, and immutable input behavior."
+      },
+      "license_and_provenance": {
+        "license": "MIT",
+        "license_verified": true,
+        "provenance_confidence": "HIGH"
+      },
+      "difficulty_basis": "Strong cross-module semantics, but environment adaptation dominates the repair itself.",
+      "budget_profile": "ENGINEERING",
+      "main_demo_recommendation": false,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    },
+    {
+      "candidate_id": "swebench-requests-5414",
+      "recommendation_reason": "Score 85/100 with BASIC scope. The exception boundary is useful but the source fix is a narrow validation guard.",
+      "maximum_risk": "Current IDNA behavior may differ from the historical Requests stack.",
+      "required_adaptation": [
+        "Crop URL preparation and exception types without transport adapters.",
+        "Lock compatible IDNA behavior in the TestProfile and prove no network calls occur."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Adapt the official FAIL_TO_PASS regression into one visible behavior test.",
+        "hidden": "Cover leading/trailing dots, empty labels, Unicode domains, valid subdomains, ports, and no socket calls."
+      },
+      "license_and_provenance": {
+        "license": "Apache-2.0",
+        "license_verified": true,
+        "provenance_confidence": "HIGH"
+      },
+      "difficulty_basis": "The exception boundary is useful but the source fix is a narrow validation guard.",
+      "budget_profile": "BASIC",
+      "main_demo_recommendation": false,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    },
+    {
+      "candidate_id": "swebench-pylint-6386",
+      "recommendation_reason": "Score 78/100 with ENGINEERING scope. Good multi-module contract bug, but license and environment costs prevent primary recommendation.",
+      "maximum_risk": "GPL obligations are stronger than the permissive-license candidates.",
+      "required_adaptation": [
+        "Design a small GPL-compliant configuration subset or reject redistribution after review.",
+        "Remove unrelated lint checkers while preserving option preprocessing and help generation."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Adapt the official FAIL_TO_PASS regression into one visible behavior test.",
+        "hidden": "Exercise short/long forms, combined arguments, help output, missing values, and neighboring options."
+      },
+      "license_and_provenance": {
+        "license": "GPL-2.0",
+        "license_verified": true,
+        "provenance_confidence": "HIGH"
+      },
+      "difficulty_basis": "Good multi-module contract bug, but license and environment costs prevent primary recommendation.",
+      "budget_profile": "ENGINEERING",
+      "main_demo_recommendation": false,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    },
+    {
+      "candidate_id": "swebench-pytest-5840",
+      "recommendation_reason": "Score 80/100 with ENGINEERING scope. Strong Windows engineering value, offset by substantial historical-runtime adaptation risk.",
+      "maximum_risk": "A synthetic path normalizer may not preserve the original conftest import semantics.",
+      "required_adaptation": [
+        "Recreate the path/cache contract in a small package without depending on pytest 5.1 running on Python 3.14.",
+        "Prove the adaptation on a real case-insensitive Windows filesystem."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Adapt the official FAIL_TO_PASS regression into one visible behavior test.",
+        "hidden": "Vary drive-letter case, directory case, relative segments, duplicate discovery roots, and cache identity."
+      },
+      "license_and_provenance": {
+        "license": "MIT",
+        "license_verified": true,
+        "provenance_confidence": "HIGH"
+      },
+      "difficulty_basis": "Strong Windows engineering value, offset by substantial historical-runtime adaptation risk.",
+      "budget_profile": "ENGINEERING",
+      "main_demo_recommendation": false,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    },
+    {
+      "candidate_id": "self-terminal-state-cas",
+      "recommendation_reason": "Score 87/100 with ENGINEERING scope. The bug needs transactional state-machine reasoning but overlaps the durable-consumption primary candidate.",
+      "maximum_risk": "The state-machine theme overlaps AgentForge durable Run behavior.",
+      "required_adaptation": [
+        "Author a new small multi-module package without copying AgentForge implementation or tests.",
+        "Inject exactly one defect and preserve a private reference fix outside the model workspace.",
+        "Bind visible and hidden tests to immutable TestProfiles."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Show normal cancel and normal complete paths separately.",
+        "hidden": "Race cancel versus start/complete, stale versions, repeated updates, and audit-event ordering."
+      },
+      "license_and_provenance": {
+        "license": "N/A - original design concept; code not yet authored",
+        "license_verified": true,
+        "provenance_confidence": "MEDIUM"
+      },
+      "difficulty_basis": "The bug needs transactional state-machine reasoning but overlaps the durable-consumption primary candidate.",
+      "budget_profile": "ENGINEERING",
+      "main_demo_recommendation": false,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    },
+    {
+      "candidate_id": "self-adapter-default-propagation",
+      "recommendation_reason": "Score 87/100 with BASIC scope. The bug is common and realistic, but a well-scoped mapping trace should resolve in one or two rounds.",
+      "maximum_risk": "The root cause may be found too quickly if all adapters use obvious `or default` expressions.",
+      "required_adaptation": [
+        "Author a new small multi-module package without copying AgentForge implementation or tests.",
+        "Inject exactly one defect and preserve a private reference fix outside the model workspace.",
+        "Bind visible and hidden tests to immutable TestProfiles."
+      ],
+      "visible_hidden_test_feasibility": {
+        "visible": "Expose one explicit false case and ordinary missing-field defaults.",
+        "hidden": "Zero, empty list, empty string where valid, nested override, null, absent key, and provider round-trip."
+      },
+      "license_and_provenance": {
+        "license": "N/A - original design concept; code not yet authored",
+        "license_verified": true,
+        "provenance_confidence": "MEDIUM"
+      },
+      "difficulty_basis": "The bug is common and realistic, but a well-scoped mapping trace should resolve in one or two rounds.",
+      "budget_profile": "BASIC",
+      "main_demo_recommendation": false,
+      "b2_manual_confirmation": [
+        "Approve the source and license obligations.",
+        "Approve the proposed crop without changing the bug's semantics.",
+        "Approve visible versus hidden test boundaries and the fixed TestProfile."
+      ]
+    }
+  ]
+}

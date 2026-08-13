@@ -1,0 +1,22 @@
+{
+  "candidate_schema_version": "1.0.0",
+  "candidate_ids": [
+    "quixbugs-bitcount",
+    "bugsinpy-tqdm-8"
+  ],
+  "rejections": [
+    {
+      "candidate_id": "quixbugs-bitcount",
+      "reasons": [
+        "Buggy execution may not terminate and depends on timeout containment.",
+        "Insufficient engineering realism for the target task set."
+      ]
+    },
+    {
+      "candidate_id": "bugsinpy-tqdm-8",
+      "reasons": [
+        "License status is not sufficiently verified for fixture redistribution."
+      ]
+    }
+  ]
+}

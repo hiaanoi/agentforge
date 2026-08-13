@@ -1,0 +1,74 @@
+{
+  "buggy_revision": "4257f44b0ff1181dedaedee6a447e133219fcebf",
+  "difficulty": "BASIC",
+  "editable_paths": [
+    "workspace/shortest_path_length.py"
+  ],
+  "expected_outcomes": {
+    "buggy": "FAIL",
+    "reference": "PASS"
+  },
+  "external_service_required": false,
+  "expected_baseline_failure": {
+    "expected_exit_class": "NON_ZERO",
+    "failed_node_ids": [
+      "tests/visible/test_shortest_path.py::test_competing_routes_choose_the_shortest_total_distance"
+    ],
+    "fingerprint_version": 1,
+    "match_mode": "EXACT_SET",
+    "runner": "pytest"
+  },
+  "fixed_revision": "4257f44b0ff1181dedaedee6a447e133219fcebf",
+  "fixture_schema_version": "1.0.0",
+  "immutable_file_sha256": {
+    "ATTRIBUTION.md": "ed84e9fbe6d862eef8ec3be2ce3ca43c5ec315afcace79698b570e688ac87ca7",
+    "reference/fixed_files/shortest_path_length.py": "06f7c5e25d35af64cb7514955ccc802d570fada3006e5ff0365582310c24319f",
+    "tests/hidden/test_shortest_path_oracle.py": "6c65699fbf682ec5a7501fcd1d4cdc4ddc966a5d85faef223e991340e2206478",
+    "tests/visible/test_shortest_path.py": "8a084e5783388fef348471780aaf4c2a558ef235f58c4ddecc1752b519550f8b"
+  },
+  "license": "MIT",
+  "limits": {
+    "max_output_chars": 10000,
+    "timeout_seconds": 15
+  },
+  "network_required": false,
+  "protected_paths": [
+    "ATTRIBUTION.md",
+    "reference/fixed_files/shortest_path_length.py",
+    "task_manifest.json",
+    "tests/hidden/test_shortest_path_oracle.py",
+    "tests/visible/test_shortest_path.py"
+  ],
+  "reference_files": [
+    "reference/fixed_files/shortest_path_length.py"
+  ],
+  "repair_prompt": {
+    "description": "The graph routine returns the wrong total when a node can be reached through competing weighted routes. Repair the implementation so it consistently returns the minimum reachable distance.",
+    "schema_version": 1,
+    "success_conditions": [
+      "Competing routes use the minimum total distance.",
+      "Unreachable goals retain the documented infinite-distance result."
+    ],
+    "title": "Correct weighted shortest-path results"
+  },
+  "source_kind": "QUIXBUGS",
+  "source_urls": [
+    "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/python_programs/shortest_path_length.py",
+    "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/correct_python_programs/shortest_path_length.py"
+  ],
+  "task_id": "quixbugs-shortest-path-length",
+  "test_commands": {
+    "hidden": [
+      "-m",
+      "pytest",
+      "tests/hidden",
+      "-q"
+    ],
+    "visible": [
+      "-m",
+      "pytest",
+      "tests/visible",
+      "-q"
+    ]
+  }
+}

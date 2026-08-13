@@ -1,0 +1,388 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentforge.example/schemas/repair-candidate-1.0.0.json",
+  "schema_version": "1.0.0",
+  "type": "object",
+  "required": [
+    "candidate_schema_version",
+    "candidates"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "candidate_schema_version": {
+      "const": "1.0.0"
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/candidate"
+      }
+    }
+  },
+  "$defs": {
+    "candidate": {
+      "type": "object",
+      "required": [
+        "candidate_id",
+        "candidate_schema_version",
+        "source_kind",
+        "source_dataset",
+        "source_project",
+        "source_bug_id",
+        "source_issue_title",
+        "source_urls",
+        "issue_url",
+        "buggy_commit",
+        "fixed_commit",
+        "license",
+        "license_verified",
+        "attribution_requirements",
+        "language",
+        "original_bug_summary",
+        "observed_failure",
+        "expected_behavior",
+        "affected_files",
+        "patch_file_count",
+        "patch_added_lines",
+        "patch_deleted_lines",
+        "original_tests",
+        "dependency_requirements",
+        "python_version_constraints",
+        "operating_system_constraints",
+        "requires_network",
+        "requires_external_service",
+        "requires_database",
+        "requires_native_build",
+        "deterministic_tests",
+        "estimated_test_runtime_seconds",
+        "expected_fixture_file_count",
+        "expected_fixture_size_bytes",
+        "expected_edit_rounds",
+        "cross_module_reasoning",
+        "requires_test_feedback",
+        "misleading_symptom",
+        "visible_test_feasibility",
+        "hidden_test_feasibility",
+        "anti_hardcoding_feasibility",
+        "windows_feasibility",
+        "offline_feasibility",
+        "adaptation_actions",
+        "adaptation_risks",
+        "provenance_confidence",
+        "difficulty_recommendation",
+        "difficulty_rationale",
+        "audit_status",
+        "exclusion_reasons",
+        "score_breakdown",
+        "total_score",
+        "evidence_notes",
+        "field_evidence",
+        "audited_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "candidate_id": {
+          "type": "string"
+        },
+        "candidate_schema_version": {
+          "const": "1.0.0"
+        },
+        "source_kind": {
+          "enum": [
+            "QUIXBUGS",
+            "BUGSINPY",
+            "SWE_BENCH",
+            "GITHUB",
+            "SELF_BUILT"
+          ]
+        },
+        "source_dataset": {
+          "type": "string"
+        },
+        "source_project": {
+          "type": "string"
+        },
+        "source_bug_id": {
+          "type": "string"
+        },
+        "source_issue_title": {
+          "type": "string"
+        },
+        "source_urls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "issue_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "buggy_commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fixed_commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "license": {
+          "type": "string"
+        },
+        "license_verified": {
+          "type": "boolean"
+        },
+        "attribution_requirements": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "original_bug_summary": {
+          "type": "string"
+        },
+        "observed_failure": {
+          "type": "string"
+        },
+        "expected_behavior": {
+          "type": "string"
+        },
+        "affected_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "patch_file_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "patch_added_lines": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "patch_deleted_lines": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "original_tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dependency_requirements": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "python_version_constraints": {
+          "type": "string"
+        },
+        "operating_system_constraints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "requires_network": {
+          "type": "boolean"
+        },
+        "requires_external_service": {
+          "type": "boolean"
+        },
+        "requires_database": {
+          "type": "boolean"
+        },
+        "requires_native_build": {
+          "type": "boolean"
+        },
+        "deterministic_tests": {
+          "type": "boolean"
+        },
+        "estimated_test_runtime_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expected_fixture_file_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expected_fixture_size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expected_edit_rounds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cross_module_reasoning": {
+          "type": "string"
+        },
+        "requires_test_feedback": {
+          "type": "boolean"
+        },
+        "misleading_symptom": {
+          "type": "boolean"
+        },
+        "visible_test_feasibility": {
+          "type": "string"
+        },
+        "hidden_test_feasibility": {
+          "type": "string"
+        },
+        "anti_hardcoding_feasibility": {
+          "type": "string"
+        },
+        "windows_feasibility": {
+          "type": "string"
+        },
+        "offline_feasibility": {
+          "type": "string"
+        },
+        "adaptation_actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "adaptation_risks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "provenance_confidence": {
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW"
+          ]
+        },
+        "difficulty_recommendation": {
+          "enum": [
+            "BASIC",
+            "ENGINEERING",
+            "CHALLENGE"
+          ]
+        },
+        "difficulty_rationale": {
+          "type": "string"
+        },
+        "audit_status": {
+          "enum": [
+            "ELIGIBLE",
+            "CONDITIONAL",
+            "REJECTED"
+          ]
+        },
+        "exclusion_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "score_breakdown": {
+          "type": "object",
+          "required": [
+            "reproducibility",
+            "runtime_compatibility",
+            "engineering_realism",
+            "hidden_test_strength",
+            "adaptation_cost",
+            "diversity_contribution",
+            "demo_value",
+            "provenance_confidence"
+          ],
+          "additionalProperties": false
+        },
+        "total_score": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "evidence_notes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "status",
+              "claim",
+              "evidence_refs"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "field_evidence": {
+          "type": "object",
+          "required": [
+            "candidate_id",
+            "candidate_schema_version",
+            "source_kind",
+            "source_dataset",
+            "source_project",
+            "source_bug_id",
+            "source_issue_title",
+            "source_urls",
+            "issue_url",
+            "buggy_commit",
+            "fixed_commit",
+            "license",
+            "license_verified",
+            "attribution_requirements",
+            "language",
+            "original_bug_summary",
+            "observed_failure",
+            "expected_behavior",
+            "affected_files",
+            "patch_file_count",
+            "patch_added_lines",
+            "patch_deleted_lines",
+            "original_tests",
+            "dependency_requirements",
+            "python_version_constraints",
+            "operating_system_constraints",
+            "requires_network",
+            "requires_external_service",
+            "requires_database",
+            "requires_native_build",
+            "deterministic_tests",
+            "estimated_test_runtime_seconds",
+            "expected_fixture_file_count",
+            "expected_fixture_size_bytes",
+            "expected_edit_rounds",
+            "cross_module_reasoning",
+            "requires_test_feedback",
+            "misleading_symptom",
+            "visible_test_feasibility",
+            "hidden_test_feasibility",
+            "anti_hardcoding_feasibility",
+            "windows_feasibility",
+            "offline_feasibility",
+            "adaptation_actions",
+            "adaptation_risks",
+            "provenance_confidence",
+            "difficulty_recommendation",
+            "difficulty_rationale",
+            "audit_status",
+            "exclusion_reasons",
+            "score_breakdown",
+            "total_score",
+            "evidence_notes",
+            "audited_at"
+          ],
+          "additionalProperties": false
+        },
+        "audited_at": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

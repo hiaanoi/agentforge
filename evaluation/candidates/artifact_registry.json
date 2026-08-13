@@ -1,0 +1,46 @@
+{
+  "registry_version": "1.0.0",
+  "generated_at": "2026-07-16T00:00:00+08:00",
+  "artifacts": [
+    {
+      "path": "evaluation/candidates/build_assets.py",
+      "sha256": "f6c984a407c342efa2ca89aaaeef47ad4e063c7099ac4b8d689107122c9b6fc8",
+      "size_bytes": 84554
+    },
+    {
+      "path": "evaluation/candidates/candidate_matrix.csv",
+      "sha256": "635bf8e98c638b034541f61a667158bb41397a688557839f2c4745b8309f27e9",
+      "size_bytes": 5924
+    },
+    {
+      "path": "evaluation/candidates/candidate_schema.json",
+      "sha256": "8335128d4c7315f75ce93b357296179d74a10ae76edaaa1631d03f6d1bb9e1a7",
+      "size_bytes": 10195
+    },
+    {
+      "path": "evaluation/candidates/candidates.json",
+      "sha256": "c41f9d1b5958d02f5945e29e8e06538a1b5b30a0b18a1eb2273d676721dd801c",
+      "size_bytes": 800854
+    },
+    {
+      "path": "evaluation/candidates/recommended_alternates.json",
+      "sha256": "e34d3f22e8a256094bdc66ee30e4dd3c18241316b8d4829f6c754bc6374821ce",
+      "size_bytes": 12484
+    },
+    {
+      "path": "evaluation/candidates/recommended_primary.json",
+      "sha256": "2c914f5f49ed63218dfdfd4896ae08ee87ff0af8d1f8947a212b2d7a557fb60e",
+      "size_bytes": 16216
+    },
+    {
+      "path": "evaluation/candidates/rejected_candidates.json",
+      "sha256": "6560d358a73f762dcecd74e1281f5c734ab9054a63c3cd8b674e083da3a8b60b",
+      "size_bytes": 554
+    },
+    {
+      "path": "evaluation/candidates/self_built_candidate_briefs.json",
+      "sha256": "573f005be5dd504ebe5ec218721c9234d15a67a9b715607b4781f92eb7cdf1cc",
+      "size_bytes": 7024
+    }
+  ]
+}

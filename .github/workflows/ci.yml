@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python: ['3.11', '3.14']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --frozen
+      - name: Prepare link-free project interpreter (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cp --dereference .venv/bin/python .venv/bin/python-link-free
+      - name: Run complete offline suite (Windows)
+        if: runner.os == 'Windows'
+        run: uv run --frozen python scripts/run_ci_tests.py
+      - name: Run complete offline suite (Linux)
+        if: runner.os == 'Linux'
+        run: .venv/bin/python-link-free scripts/run_ci_tests.py
+      - run: uv run --frozen ruff check src tests scripts
+      - run: uv run --frozen mypy --platform win32 src scripts
+      - run: uv build
+      - name: Fresh-wheel smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $wheel = Get-ChildItem dist/*.whl | Select-Object -First 1
+          python -m venv .wheel-venv
+          .wheel-venv/Scripts/python -m pip install $wheel.FullName
+          .wheel-venv/Scripts/agentforge --help
+          $env:PATH = "$PWD/.wheel-venv/Scripts;$env:PATH"
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/demo_core.ps1
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/demo_recovery.ps1
+      - name: Fresh-wheel smoke (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          wheel=$(find dist -name '*.whl' -print -quit)
+          python -m venv .wheel-venv
+          .wheel-venv/bin/python -m pip install "$wheel"
+          cp --dereference .wheel-venv/bin/python .wheel-venv/bin/python-link-free
+          mv --force .wheel-venv/bin/python-link-free .wheel-venv/bin/python
+          .wheel-venv/bin/agentforge --help
+          PATH="$PWD/.wheel-venv/bin:$PATH" sh ./scripts/demo_core.sh
+          PATH="$PWD/.wheel-venv/bin:$PATH" sh ./scripts/demo_recovery.sh

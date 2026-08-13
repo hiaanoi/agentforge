@@ -1,0 +1,74 @@
+{
+  "buggy_revision": "c071af761e1550c6e4ebab8e5af747d2d8fdd48e",
+  "difficulty": "BASIC",
+  "editable_paths": [
+    "workspace/diagnostics.py"
+  ],
+  "expected_outcomes": {
+    "buggy": "FAIL",
+    "reference": "PASS"
+  },
+  "external_service_required": false,
+  "expected_baseline_failure": {
+    "expected_exit_class": "NON_ZERO",
+    "failed_node_ids": [
+      "tests/visible/test_diagnostics.py::test_non_ascii_diagnostic_round_trips_as_utf8"
+    ],
+    "fingerprint_version": 1,
+    "match_mode": "EXACT_SET",
+    "runner": "pytest"
+  },
+  "fixed_revision": "8e7848c63efe36f09e4651bece8c0efc34a1c3e1",
+  "fixture_schema_version": "1.0.0",
+  "immutable_file_sha256": {
+    "ATTRIBUTION.md": "6b9b72215d179700ff341759dc07230217326e5feffc53715c6f1d2442da1488",
+    "reference/fixed_files/diagnostics.py": "47b549f1eaa284b6ed7ac1175f6b8309281097d110dc9fc64412ae34b83c0fc1",
+    "tests/hidden/test_diagnostic_encoding.py": "bf1bc9dbd3661b2afe6e26db23f3d1e9482e1d5f2c225b04d160d49b12dcf16a",
+    "tests/visible/test_diagnostics.py": "4d0393fc5e2e7364a9d5d160fe97c1155002176bc6d296a70c94f16c030acb49"
+  },
+  "license": "MIT",
+  "limits": {
+    "max_output_chars": 10000,
+    "timeout_seconds": 15
+  },
+  "network_required": false,
+  "protected_paths": [
+    "ATTRIBUTION.md",
+    "reference/fixed_files/diagnostics.py",
+    "task_manifest.json",
+    "tests/hidden/test_diagnostic_encoding.py",
+    "tests/visible/test_diagnostics.py"
+  ],
+  "reference_files": [
+    "reference/fixed_files/diagnostics.py"
+  ],
+  "repair_prompt": {
+    "description": "The diagnostic writer fails when messages contain non-ASCII characters. Update the implementation so diagnostic files preserve the supplied text across supported platforms.",
+    "schema_version": 1,
+    "success_conditions": [
+      "Non-ASCII diagnostics are written without encoding errors.",
+      "The resulting file contains the exact supplied text."
+    ],
+    "title": "Preserve Unicode diagnostic text"
+  },
+  "source_kind": "BUGSINPY",
+  "source_urls": [
+    "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/black/bugs/21/bug_patch.txt",
+    "https://github.com/psf/black/commit/8e7848c63efe36f09e4651bece8c0efc34a1c3e1"
+  ],
+  "task_id": "bugsinpy-black-21",
+  "test_commands": {
+    "hidden": [
+      "-m",
+      "pytest",
+      "tests/hidden",
+      "-q"
+    ],
+    "visible": [
+      "-m",
+      "pytest",
+      "tests/visible",
+      "-q"
+    ]
+  }
+}

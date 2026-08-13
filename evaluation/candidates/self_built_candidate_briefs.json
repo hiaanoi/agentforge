@@ -1,0 +1,115 @@
+{
+  "candidate_schema_version": "1.0.0",
+  "briefs": [
+    {
+      "candidate_id": "self-durable-double-consumption",
+      "user_visible_symptom": "A durable queue consumer increments an account or emits a notification twice after a crash window.",
+      "expected_module_structure": [
+        "durable_queue/models.py",
+        "durable_queue/repository.py",
+        "durable_queue/worker.py",
+        "durable_queue/service.py"
+      ],
+      "root_cause_category": "durability ordering and idempotency",
+      "cross_module_reasoning": "The model state, SQLite transaction boundary, worker recovery cursor, and service-visible result must be reasoned about together.",
+      "visible_tests": "Show one ordinary restart path and one command receipt without exposing the crash-window interleaving.",
+      "hidden_tests": "Crash after effect/before cursor, restart twice, duplicate command IDs, stale receipts, and concurrent consumers.",
+      "common_bad_patches": [
+        "Move the cursor write later without making receipt and cursor atomic.",
+        "Ignore duplicate errors while the side effect still executes twice."
+      ],
+      "anti_hardcoding": "Generate command IDs and crash points; verify ledger invariants and exact effect counts.",
+      "difficulty": "ENGINEERING",
+      "expected_edit_rounds": 3,
+      "why_not_agentforge_copy": "Use a fictional billing ledger and queue protocol with no Approval, Run, Snapshot, or AgentForge repository APIs."
+    },
+    {
+      "candidate_id": "self-policy-priority-shadow",
+      "user_visible_symptom": "A protected resource is allowed because a generic prefix rule is evaluated before its deny exception.",
+      "expected_module_structure": [
+        "access_policy/models.py",
+        "access_policy/matcher.py",
+        "access_policy/evaluator.py",
+        "access_policy/config.py"
+      ],
+      "root_cause_category": "policy ordering and specificity",
+      "cross_module_reasoning": "Rule parsing, normalization, specificity calculation, priority ordering, and final decision provenance must remain consistent.",
+      "visible_tests": "Expose a generic allow and one unrelated deny while keeping the decisive overlap hidden.",
+      "hidden_tests": "Overlapping prefixes, equal priority, explicit deny, approval requirements, order permutations, and unknown resources.",
+      "common_bad_patches": [
+        "Always evaluate deny first, breaking explicit higher-priority exceptions.",
+        "Sort rules in place and mutate administrator configuration."
+      ],
+      "anti_hardcoding": "Randomize declaration order and assert decision plus winning-rule provenance.",
+      "difficulty": "ENGINEERING",
+      "expected_edit_rounds": 2,
+      "why_not_agentforge_copy": "Define a standalone resource-routing policy language with different capabilities and decision rules."
+    },
+    {
+      "candidate_id": "self-async-cancel-cleanup",
+      "user_visible_symptom": "After cancellation, background work continues and a resource pool remains exhausted for later requests.",
+      "expected_module_structure": [
+        "async_jobs/coordinator.py",
+        "async_jobs/leases.py",
+        "async_jobs/workers.py",
+        "async_jobs/service.py"
+      ],
+      "root_cause_category": "structured cancellation and resource ownership",
+      "cross_module_reasoning": "Structured concurrency, exception groups, lease ownership, cleanup ordering, and service state interact under races.",
+      "visible_tests": "Show cancellation during one worker await and verify the top-level task ends.",
+      "hidden_tests": "Cancel during lease acquisition, partial fan-out, child failure, repeated cancel, timeout, and post-cancel reuse.",
+      "common_bad_patches": [
+        "Catch CancelledError and return before child tasks finish.",
+        "Release leases in both child and parent cleanup, causing double release."
+      ],
+      "anti_hardcoding": "Vary synchronization barriers and assert no live task plus exact lease accounting.",
+      "difficulty": "CHALLENGE",
+      "expected_edit_rounds": 3,
+      "why_not_agentforge_copy": "Use asyncio tasks and in-memory leases, not AgentForge process supervision or test execution records."
+    },
+    {
+      "candidate_id": "self-terminal-state-cas",
+      "user_visible_symptom": "A cancelled operation later appears running or completed, contradicting the durable audit trail.",
+      "expected_module_structure": [
+        "job_state/models.py",
+        "job_state/repository.py",
+        "job_state/worker.py",
+        "job_state/api.py"
+      ],
+      "root_cause_category": "optimistic concurrency and terminal-state invariants",
+      "cross_module_reasoning": "State transition rules, repository CAS predicates, worker retries, and API projections must agree under concurrency.",
+      "visible_tests": "Show normal cancel and normal complete paths separately.",
+      "hidden_tests": "Race cancel versus start/complete, stale versions, repeated updates, and audit-event ordering.",
+      "common_bad_patches": [
+        "Check terminal state in Python before an unconditional database update.",
+        "Let COMPLETED always win, even when cancellation committed first."
+      ],
+      "anti_hardcoding": "Schedule deterministic interleavings with barriers and assert version plus transition invariants.",
+      "difficulty": "ENGINEERING",
+      "expected_edit_rounds": 3,
+      "why_not_agentforge_copy": "Use a document-conversion job domain and a distinct state/version model with independently written tests."
+    },
+    {
+      "candidate_id": "self-adapter-default-propagation",
+      "user_visible_symptom": "A user disables retries or sets a zero limit, but the downstream client receives the default value.",
+      "expected_module_structure": [
+        "client_adapter/request.py",
+        "client_adapter/mapper.py",
+        "client_adapter/provider.py",
+        "client_adapter/config.py"
+      ],
+      "root_cause_category": "field-presence semantics and nested parameter propagation",
+      "cross_module_reasoning": "Input parsing, default resolution, nested DTO mapping, and provider payload serialization each influence the final value.",
+      "visible_tests": "Expose one explicit false case and ordinary missing-field defaults.",
+      "hidden_tests": "Zero, empty list, empty string where valid, nested override, null, absent key, and provider round-trip.",
+      "common_bad_patches": [
+        "Special-case only false while zero and empty collections still disappear.",
+        "Stop defaulting entirely and break absent-field behavior."
+      ],
+      "anti_hardcoding": "Generate falsy values by field type and compare a semantic payload matrix.",
+      "difficulty": "BASIC",
+      "expected_edit_rounds": 2,
+      "why_not_agentforge_copy": "Use a storage-client adapter unrelated to LLM providers or AgentForge model request types."
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "preflight_schema_version": "1.0.0",
+  "automatic_replacement_performed": false,
+  "human_decision": "NO_REPLACEMENTS_ACCEPTED",
+  "accepted_primary_candidate_ids": [
+    "quixbugs-shortest-path-length",
+    "quixbugs-topological-ordering",
+    "bugsinpy-black-21",
+    "bugsinpy-pysnooper-3",
+    "bugsinpy-httpie-4",
+    "swebench-flask-5014",
+    "swebench-pytest-10051",
+    "self-durable-double-consumption",
+    "self-policy-priority-shadow",
+    "self-async-cancel-cleanup"
+  ],
+  "recommendations": [
+    {
+      "primary_candidate_id": "bugsinpy-httpie-4",
+      "alternate_candidate_id": "bugsinpy-cookiecutter-2",
+      "trigger": "Only if the B2.1 case-insensitive mapping fidelity check fails",
+      "requires_human_approval": true
+    }
+  ]
+}

@@ -1,0 +1,293 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schema_version": "1.0.0",
+  "$defs": {
+    "preflight_result": {
+      "type": "object",
+      "required": [
+        "candidate_id",
+        "preflight_schema_version",
+        "source_kind",
+        "original_audit_status",
+        "source_project",
+        "source_bug_id",
+        "license",
+        "license_status",
+        "attribution_requirements",
+        "buggy_revision",
+        "fixed_revision",
+        "source_evidence",
+        "source_checkout_verified",
+        "bug_fix_relation_verified",
+        "original_failure_reproduced",
+        "reference_fix_verified",
+        "failure_command",
+        "passing_command",
+        "test_repetitions",
+        "deterministic_result",
+        "minimum_test_runtime_ms",
+        "maximum_test_runtime_ms",
+        "dependency_inventory",
+        "dependency_install_required_for_source_audit",
+        "target_fixture_runtime_dependencies",
+        "network_required",
+        "external_service_required",
+        "database_required",
+        "native_build_required",
+        "python_3_14_status",
+        "windows_status",
+        "offline_status",
+        "fixed_test_profile_feasibility",
+        "crop_feasibility",
+        "crop_fidelity_risk",
+        "required_source_files",
+        "required_test_files",
+        "required_support_files",
+        "expected_fixture_file_count",
+        "expected_fixture_size_bytes",
+        "reference_patch_files",
+        "reference_patch_lines",
+        "reference_patch_changes_tests",
+        "reference_patch_changes_dependencies",
+        "visible_test_plan",
+        "hidden_test_plan",
+        "anti_hardcoding_plan",
+        "known_incorrect_patch_examples",
+        "protected_paths_plan",
+        "expected_edit_rounds",
+        "difficulty_before",
+        "difficulty_after_preflight",
+        "difficulty_change_reason",
+        "demo_suitability",
+        "primary_risks",
+        "unresolved_questions",
+        "evidence_classification",
+        "final_gate",
+        "gate_reasons",
+        "conditional_resolution",
+        "recommended_action",
+        "audited_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "candidate_id": {
+          "type": "string"
+        },
+        "preflight_schema_version": {
+          "type": "string"
+        },
+        "source_kind": {
+          "type": "string",
+          "enum": [
+            "QUIXBUGS",
+            "BUGSINPY",
+            "SWE_BENCH",
+            "SELF_BUILT"
+          ]
+        },
+        "original_audit_status": {
+          "type": "string"
+        },
+        "source_project": {
+          "type": "string"
+        },
+        "source_bug_id": {
+          "type": "string"
+        },
+        "license": {
+          "type": "string"
+        },
+        "license_status": {
+          "type": "string"
+        },
+        "attribution_requirements": {
+          "type": "string"
+        },
+        "buggy_revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fixed_revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_evidence": {
+          "type": "array"
+        },
+        "source_checkout_verified": {
+          "type": "boolean"
+        },
+        "bug_fix_relation_verified": {
+          "type": "boolean"
+        },
+        "original_failure_reproduced": {
+          "type": "boolean"
+        },
+        "reference_fix_verified": {
+          "type": "boolean"
+        },
+        "failure_command": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "passing_command": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "test_repetitions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deterministic_result": {
+          "type": "boolean"
+        },
+        "minimum_test_runtime_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maximum_test_runtime_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dependency_inventory": {
+          "type": "array"
+        },
+        "dependency_install_required_for_source_audit": {
+          "type": "boolean"
+        },
+        "target_fixture_runtime_dependencies": {
+          "type": "array"
+        },
+        "network_required": {
+          "type": "boolean"
+        },
+        "external_service_required": {
+          "type": "boolean"
+        },
+        "database_required": {
+          "type": "boolean"
+        },
+        "native_build_required": {
+          "type": "boolean"
+        },
+        "python_3_14_status": {
+          "type": "string"
+        },
+        "windows_status": {
+          "type": "string"
+        },
+        "offline_status": {
+          "type": "string"
+        },
+        "fixed_test_profile_feasibility": {
+          "type": "boolean"
+        },
+        "crop_feasibility": {
+          "type": "string"
+        },
+        "crop_fidelity_risk": {
+          "type": "string"
+        },
+        "required_source_files": {
+          "type": "array"
+        },
+        "required_test_files": {
+          "type": "array"
+        },
+        "required_support_files": {
+          "type": "array"
+        },
+        "expected_fixture_file_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expected_fixture_size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reference_patch_files": {
+          "type": "array"
+        },
+        "reference_patch_lines": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reference_patch_changes_tests": {
+          "type": "boolean"
+        },
+        "reference_patch_changes_dependencies": {
+          "type": "boolean"
+        },
+        "visible_test_plan": {
+          "type": "string"
+        },
+        "hidden_test_plan": {
+          "type": "string"
+        },
+        "anti_hardcoding_plan": {
+          "type": "string"
+        },
+        "known_incorrect_patch_examples": {
+          "type": "array"
+        },
+        "protected_paths_plan": {
+          "type": "array"
+        },
+        "expected_edit_rounds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "difficulty_before": {
+          "type": "string"
+        },
+        "difficulty_after_preflight": {
+          "type": "string"
+        },
+        "difficulty_change_reason": {
+          "type": "string"
+        },
+        "demo_suitability": {
+          "type": "string"
+        },
+        "primary_risks": {
+          "type": "array"
+        },
+        "unresolved_questions": {
+          "type": "array"
+        },
+        "evidence_classification": {
+          "type": "object"
+        },
+        "final_gate": {
+          "type": "string",
+          "enum": [
+            "GO",
+            "CONDITIONAL",
+            "NO_GO",
+            "UNVERIFIED"
+          ]
+        },
+        "gate_reasons": {
+          "type": "array"
+        },
+        "conditional_resolution": {
+          "type": "array"
+        },
+        "recommended_action": {
+          "type": "string"
+        },
+        "audited_at": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

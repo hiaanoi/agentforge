@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/task_manifest",
+  "$defs": {
+    "task_manifest": {
+      "additionalProperties": false,
+      "properties": {
+        "buggy_revision": {"type": ["string", "null"]},
+        "difficulty": {"enum": ["BASIC", "ENGINEERING", "CHALLENGE"]},
+        "editable_paths": {"items": {"type": "string"}, "minItems": 1, "type": "array"},
+        "expected_outcomes": {
+          "additionalProperties": false,
+          "properties": {"buggy": {"const": "FAIL"}, "reference": {"const": "PASS"}},
+          "required": ["buggy", "reference"],
+          "type": "object"
+        },
+        "external_service_required": {"const": false},
+        "expected_baseline_failure": {
+          "additionalProperties": false,
+          "properties": {
+            "runner": {"const": "pytest"},
+            "expected_exit_class": {"const": "NON_ZERO"},
+            "failed_node_ids": {
+              "items": {"pattern": "^tests/visible/.+::.+$", "type": "string"},
+              "maxItems": 100,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "match_mode": {"const": "EXACT_SET"},
+            "fingerprint_version": {"const": 1}
+          },
+          "required": [
+            "runner", "expected_exit_class", "failed_node_ids", "match_mode",
+            "fingerprint_version"
+          ],
+          "type": "object"
+        },
+        "fixture_schema_version": {"const": "1.0.0"},
+        "fixed_revision": {"type": ["string", "null"]},
+        "immutable_file_sha256": {
+          "additionalProperties": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+          "type": "object"
+        },
+        "license": {"type": "string"},
+        "limits": {
+          "additionalProperties": false,
+          "properties": {
+            "max_output_chars": {"maximum": 20000, "minimum": 1, "type": "integer"},
+            "timeout_seconds": {"maximum": 30, "minimum": 1, "type": "integer"}
+          },
+          "required": ["timeout_seconds", "max_output_chars"],
+          "type": "object"
+        },
+        "network_required": {"const": false},
+        "protected_paths": {"items": {"type": "string"}, "minItems": 1, "type": "array"},
+        "reference_files": {"items": {"type": "string"}, "minItems": 1, "type": "array"},
+        "repair_prompt": {
+          "additionalProperties": false,
+          "properties": {
+            "schema_version": {"const": 1},
+            "title": {"maxLength": 200, "minLength": 1, "type": "string"},
+            "description": {"maxLength": 4000, "minLength": 1, "type": "string"},
+            "success_conditions": {
+              "items": {"maxLength": 1000, "minLength": 1, "type": "string"},
+              "maxItems": 20,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": ["schema_version", "title", "description", "success_conditions"],
+          "type": "object"
+        },
+        "source_kind": {"enum": ["QUIXBUGS", "BUGSINPY", "SWE_BENCH", "SELF_BUILT"]},
+        "source_urls": {"items": {"format": "uri", "type": "string"}, "type": "array"},
+        "task_id": {"pattern": "^[a-z0-9-]+$", "type": "string"},
+        "test_commands": {
+          "additionalProperties": false,
+          "properties": {
+            "hidden": {"items": {"type": "string"}, "type": "array"},
+            "visible": {"items": {"type": "string"}, "type": "array"}
+          },
+          "required": ["visible", "hidden"],
+          "type": "object"
+        }
+      },
+      "required": [
+        "fixture_schema_version", "task_id", "source_kind", "difficulty", "license",
+        "source_urls", "buggy_revision", "fixed_revision", "network_required",
+        "external_service_required", "expected_baseline_failure", "repair_prompt", "editable_paths", "protected_paths", "reference_files",
+        "test_commands", "expected_outcomes", "limits", "immutable_file_sha256"
+      ],
+      "type": "object"
+    }
+  },
+  "schema_version": "1.0.0"
+}

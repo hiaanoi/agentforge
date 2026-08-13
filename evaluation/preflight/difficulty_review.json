@@ -1,0 +1,71 @@
+{
+  "preflight_schema_version": "1.0.0",
+  "changes": [],
+  "reviews": [
+    {
+      "candidate_id": "quixbugs-shortest-path-length",
+      "difficulty_before": "BASIC",
+      "difficulty_after_preflight": "BASIC",
+      "reason": "No change: execution scope, patch size, symptom distance, and hidden-test complexity support the M7-B1 label."
+    },
+    {
+      "candidate_id": "quixbugs-topological-ordering",
+      "difficulty_before": "BASIC",
+      "difficulty_after_preflight": "BASIC",
+      "reason": "No change: execution scope, patch size, symptom distance, and hidden-test complexity support the M7-B1 label."
+    },
+    {
+      "candidate_id": "bugsinpy-black-21",
+      "difficulty_before": "BASIC",
+      "difficulty_after_preflight": "BASIC",
+      "reason": "No change: execution scope, patch size, symptom distance, and hidden-test complexity support the M7-B1 label."
+    },
+    {
+      "candidate_id": "bugsinpy-pysnooper-3",
+      "difficulty_before": "BASIC",
+      "difficulty_after_preflight": "BASIC",
+      "reason": "No change: execution scope, patch size, symptom distance, and hidden-test complexity support the M7-B1 label."
+    },
+    {
+      "candidate_id": "bugsinpy-httpie-4",
+      "difficulty_before": "BASIC",
+      "difficulty_after_preflight": "BASIC",
+      "reason": "No change: execution scope, patch size, symptom distance, and hidden-test complexity support the M7-B1 label."
+    },
+    {
+      "candidate_id": "swebench-flask-5014",
+      "difficulty_before": "BASIC",
+      "difficulty_after_preflight": "BASIC",
+      "reason": "No change: execution scope, patch size, symptom distance, and hidden-test complexity support the M7-B1 label."
+    },
+    {
+      "candidate_id": "swebench-pytest-10051",
+      "difficulty_before": "ENGINEERING",
+      "difficulty_after_preflight": "ENGINEERING",
+      "reason": "No change: execution scope, patch size, symptom distance, and hidden-test complexity support the M7-B1 label."
+    },
+    {
+      "candidate_id": "self-durable-double-consumption",
+      "difficulty_before": "ENGINEERING",
+      "difficulty_after_preflight": "ENGINEERING",
+      "reason": "No change: module count, causal distance, feedback rounds, and hidden interleavings support the original label."
+    },
+    {
+      "candidate_id": "self-policy-priority-shadow",
+      "difficulty_before": "ENGINEERING",
+      "difficulty_after_preflight": "ENGINEERING",
+      "reason": "No change: module count, causal distance, feedback rounds, and hidden interleavings support the original label."
+    },
+    {
+      "candidate_id": "self-async-cancel-cleanup",
+      "difficulty_before": "CHALLENGE",
+      "difficulty_after_preflight": "CHALLENGE",
+      "reason": "No change: module count, causal distance, feedback rounds, and hidden interleavings support the original label."
+    }
+  ],
+  "accepted_mix_preserved": {
+    "BASIC": 6,
+    "ENGINEERING": 3,
+    "CHALLENGE": 1
+  }
+}

@@ -1,0 +1,2072 @@
+{
+  "preflight_schema_version": "1.0.0",
+  "selection_basis": "M7_B1_HUMAN_APPROVED_PRIMARY",
+  "candidate_ids": [
+    "quixbugs-shortest-path-length",
+    "quixbugs-topological-ordering",
+    "bugsinpy-black-21",
+    "bugsinpy-pysnooper-3",
+    "bugsinpy-httpie-4",
+    "swebench-flask-5014",
+    "swebench-pytest-10051",
+    "self-durable-double-consumption",
+    "self-policy-priority-shadow",
+    "self-async-cancel-cleanup"
+  ],
+  "results": [
+    {
+      "candidate_id": "quixbugs-shortest-path-length",
+      "preflight_schema_version": "1.0.0",
+      "source_kind": "QUIXBUGS",
+      "original_audit_status": "ELIGIBLE",
+      "source_project": "jkoppel/QuixBugs",
+      "source_bug_id": "shortest_path_length",
+      "license": "MIT",
+      "license_status": "VERIFIED",
+      "attribution_requirements": "Retain the QuixBugs MIT copyright and permission notice.",
+      "buggy_revision": "4257f44b0ff1181dedaedee6a447e133219fcebf",
+      "fixed_revision": "4257f44b0ff1181dedaedee6a447e133219fcebf",
+      "source_evidence": [
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/python_programs/shortest_path_length.py"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/correct_python_programs/shortest_path_length.py"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/python_testcases/test_shortest_path_length.py"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/LICENSE"
+        },
+        {
+          "kind": "EXECUTION_SUMMARY",
+          "reference": "execution:quixbugs-shortest-path-length:three-repetition-summary"
+        }
+      ],
+      "source_checkout_verified": true,
+      "bug_fix_relation_verified": true,
+      "original_failure_reproduced": true,
+      "reference_fix_verified": true,
+      "failure_command": "python -m pytest python_testcases/test_shortest_path_length.py -q",
+      "passing_command": "python -m pytest python_testcases/test_shortest_path_length.py -q --correct",
+      "test_repetitions": 3,
+      "deterministic_result": true,
+      "minimum_test_runtime_ms": 1083,
+      "maximum_test_runtime_ms": 1549,
+      "dependency_inventory": [
+        "Python 3.14.3",
+        "pytest 9.1.1 for source audit"
+      ],
+      "dependency_install_required_for_source_audit": false,
+      "target_fixture_runtime_dependencies": [
+        "Python standard library",
+        "pre-provisioned pytest TestProfile"
+      ],
+      "network_required": false,
+      "external_service_required": false,
+      "database_required": false,
+      "native_build_required": false,
+      "python_3_14_status": "VERIFIED",
+      "windows_status": "VERIFIED",
+      "offline_status": "VERIFIED",
+      "fixed_test_profile_feasibility": true,
+      "crop_feasibility": "VERIFIED",
+      "crop_fidelity_risk": "LOW",
+      "required_source_files": [
+        "python_programs/shortest_path_length.py"
+      ],
+      "required_test_files": [
+        "python_testcases/test_shortest_path_length.py"
+      ],
+      "required_support_files": [
+        "node.py",
+        "LICENSE"
+      ],
+      "expected_fixture_file_count": 5,
+      "expected_fixture_size_bytes": 18000,
+      "reference_patch_files": [
+        "python_programs/shortest_path_length.py"
+      ],
+      "reference_patch_lines": 2,
+      "reference_patch_changes_tests": false,
+      "reference_patch_changes_dependencies": false,
+      "visible_test_plan": "Expose one multiple-route graph where the returned distance is wrong without identifying the relaxation expression.",
+      "hidden_test_plan": "Cover direct, indirect, equal-cost, unreachable, stale-heap, and start-equals-goal cases with an independent shortest-path oracle.",
+      "anti_hardcoding_plan": "Generate deterministic graph variants and compare semantic distances rather than exact intermediate heap state.",
+      "known_incorrect_patch_examples": [
+        "Always add the outgoing edge to the first queued distance",
+        "Return the direct edge when one exists"
+      ],
+      "protected_paths_plan": [
+        "tests/",
+        "task_manifest.json",
+        "LICENSE"
+      ],
+      "expected_edit_rounds": 1,
+      "difficulty_before": "BASIC",
+      "difficulty_after_preflight": "BASIC",
+      "difficulty_change_reason": "No change: execution scope, patch size, symptom distance, and hidden-test complexity support the M7-B1 label.",
+      "demo_suitability": "GOOD",
+      "primary_risks": [
+        "The one-line repair can become obvious if the visible graph is too small."
+      ],
+      "unresolved_questions": [],
+      "evidence_classification": {
+        "license_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/python_programs/shortest_path_length.py"
+          ],
+          "summary": "License text and attribution were checked at the pinned source revision."
+        },
+        "source_checkout_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/python_programs/shortest_path_length.py",
+            "execution:quixbugs-shortest-path-length:three-repetition-summary"
+          ],
+          "summary": "Pinned public checkout was inspected, or the original self-built design boundary was reviewed."
+        },
+        "bug_fix_relation_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/python_programs/shortest_path_length.py",
+            "execution:quixbugs-shortest-path-length:three-repetition-summary"
+          ],
+          "summary": "The public fix relation was executed or the self-built causal repair was closed at design level."
+        },
+        "original_failure_reproduced": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:quixbugs-shortest-path-length:three-repetition-summary"
+          ],
+          "summary": "Buggy state failed deterministically for public sources; self-built fixtures do not exist in B2.0."
+        },
+        "reference_fix_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:quixbugs-shortest-path-length:three-repetition-summary"
+          ],
+          "summary": "Fixed state passed deterministically for public sources; self-built repair remains a reviewed design."
+        },
+        "deterministic_result": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:quixbugs-shortest-path-length:three-repetition-summary"
+          ],
+          "summary": "Public checks were repeated three times; self-built determinism relies on the specified barrier/test design."
+        },
+        "python_3_14_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:quixbugs-shortest-path-length:three-repetition-summary"
+          ],
+          "summary": "Public target logic was exercised on Python 3.14; self-built compatibility is a standard-library design constraint."
+        },
+        "windows_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:quixbugs-shortest-path-length:three-repetition-summary"
+          ],
+          "summary": "Public probes ran on Windows; self-built platform behavior remains design-level."
+        },
+        "offline_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:quixbugs-shortest-path-length:three-repetition-summary"
+          ],
+          "summary": "All admitted checks and proposed TestProfiles use local resources only."
+        },
+        "fixed_test_profile_feasibility": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:quixbugs-shortest-path-length:three-repetition-summary"
+          ],
+          "summary": "Execution used fixed absolute Python, cwd, argv, and an explicit cleared environment, or defines that same boundary for self-built work."
+        },
+        "crop_feasibility": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:quixbugs-shortest-path-length:three-repetition-summary"
+          ],
+          "summary": "Disposable probes established the target causal slice; conditional items retain a named B2.1 fidelity condition."
+        },
+        "final_gate": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/python_programs/shortest_path_length.py",
+            "execution:quixbugs-shortest-path-length:three-repetition-summary"
+          ],
+          "summary": "Gate follows the documented hard requirements and preserves conditional risks."
+        }
+      },
+      "final_gate": "GO",
+      "gate_reasons": [
+        "Official buggy/correct programs and four-case test were each executed three times on Windows with Python 3.14; buggy failed and correct passed deterministically."
+      ],
+      "conditional_resolution": [],
+      "recommended_action": "ENTER_B2_1_CONSTRUCTION",
+      "audited_at": "2026-07-16T00:00:00+08:00"
+    },
+    {
+      "candidate_id": "quixbugs-topological-ordering",
+      "preflight_schema_version": "1.0.0",
+      "source_kind": "QUIXBUGS",
+      "original_audit_status": "ELIGIBLE",
+      "source_project": "jkoppel/QuixBugs",
+      "source_bug_id": "topological_ordering",
+      "license": "MIT",
+      "license_status": "VERIFIED",
+      "attribution_requirements": "Retain the QuixBugs MIT copyright and permission notice.",
+      "buggy_revision": "4257f44b0ff1181dedaedee6a447e133219fcebf",
+      "fixed_revision": "4257f44b0ff1181dedaedee6a447e133219fcebf",
+      "source_evidence": [
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/python_programs/topological_ordering.py"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/correct_python_programs/topological_ordering.py"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/python_testcases/test_topological_ordering.py"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/LICENSE"
+        },
+        {
+          "kind": "EXECUTION_SUMMARY",
+          "reference": "execution:quixbugs-topological-ordering:three-repetition-summary"
+        }
+      ],
+      "source_checkout_verified": true,
+      "bug_fix_relation_verified": true,
+      "original_failure_reproduced": true,
+      "reference_fix_verified": true,
+      "failure_command": "python -m pytest python_testcases/test_topological_ordering.py -q",
+      "passing_command": "python -m pytest python_testcases/test_topological_ordering.py -q --correct",
+      "test_repetitions": 3,
+      "deterministic_result": true,
+      "minimum_test_runtime_ms": 1111,
+      "maximum_test_runtime_ms": 1521,
+      "dependency_inventory": [
+        "Python 3.14.3",
+        "pytest 9.1.1 for source audit"
+      ],
+      "dependency_install_required_for_source_audit": false,
+      "target_fixture_runtime_dependencies": [
+        "Python standard library",
+        "pre-provisioned pytest TestProfile"
+      ],
+      "network_required": false,
+      "external_service_required": false,
+      "database_required": false,
+      "native_build_required": false,
+      "python_3_14_status": "VERIFIED",
+      "windows_status": "VERIFIED",
+      "offline_status": "VERIFIED",
+      "fixed_test_profile_feasibility": true,
+      "crop_feasibility": "CONDITIONAL",
+      "crop_fidelity_risk": "MEDIUM",
+      "required_source_files": [
+        "python_programs/topological_ordering.py"
+      ],
+      "required_test_files": [
+        "python_testcases/test_topological_ordering.py"
+      ],
+      "required_support_files": [
+        "node.py",
+        "LICENSE"
+      ],
+      "expected_fixture_file_count": 5,
+      "expected_fixture_size_bytes": 18000,
+      "reference_patch_files": [
+        "python_programs/topological_ordering.py"
+      ],
+      "reference_patch_lines": 2,
+      "reference_patch_changes_tests": false,
+      "reference_patch_changes_dependencies": false,
+      "visible_test_plan": "Expose a DAG where dependency satisfaction is confused with successor satisfaction.",
+      "hidden_test_plan": "Validate edge-order properties across multiple roots, converging edges, isolated nodes, and input permutations without requiring one arbitrary valid order.",
+      "anti_hardcoding_plan": "Use a property oracle that accepts every valid topological order and rejects hard-coded node sequences.",
+      "known_incorrect_patch_examples": [
+        "Hard-code the three upstream expected lists",
+        "Sort nodes by value before returning"
+      ],
+      "protected_paths_plan": [
+        "tests/",
+        "task_manifest.json",
+        "LICENSE"
+      ],
+      "expected_edit_rounds": 1,
+      "difficulty_before": "BASIC",
+      "difficulty_after_preflight": "BASIC",
+      "difficulty_change_reason": "No change: execution scope, patch size, symptom distance, and hidden-test complexity support the M7-B1 label.",
+      "demo_suitability": "FAIR",
+      "primary_risks": [
+        "Upstream tests assert one exact order although multiple topological orders can be valid."
+      ],
+      "unresolved_questions": [
+        "Can the crop preserve deterministic presentation without treating one valid order as the only correct output?"
+      ],
+      "evidence_classification": {
+        "license_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/python_programs/topological_ordering.py"
+          ],
+          "summary": "License text and attribution were checked at the pinned source revision."
+        },
+        "source_checkout_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/python_programs/topological_ordering.py",
+            "execution:quixbugs-topological-ordering:three-repetition-summary"
+          ],
+          "summary": "Pinned public checkout was inspected, or the original self-built design boundary was reviewed."
+        },
+        "bug_fix_relation_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/python_programs/topological_ordering.py",
+            "execution:quixbugs-topological-ordering:three-repetition-summary"
+          ],
+          "summary": "The public fix relation was executed or the self-built causal repair was closed at design level."
+        },
+        "original_failure_reproduced": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:quixbugs-topological-ordering:three-repetition-summary"
+          ],
+          "summary": "Buggy state failed deterministically for public sources; self-built fixtures do not exist in B2.0."
+        },
+        "reference_fix_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:quixbugs-topological-ordering:three-repetition-summary"
+          ],
+          "summary": "Fixed state passed deterministically for public sources; self-built repair remains a reviewed design."
+        },
+        "deterministic_result": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:quixbugs-topological-ordering:three-repetition-summary"
+          ],
+          "summary": "Public checks were repeated three times; self-built determinism relies on the specified barrier/test design."
+        },
+        "python_3_14_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:quixbugs-topological-ordering:three-repetition-summary"
+          ],
+          "summary": "Public target logic was exercised on Python 3.14; self-built compatibility is a standard-library design constraint."
+        },
+        "windows_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:quixbugs-topological-ordering:three-repetition-summary"
+          ],
+          "summary": "Public probes ran on Windows; self-built platform behavior remains design-level."
+        },
+        "offline_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:quixbugs-topological-ordering:three-repetition-summary"
+          ],
+          "summary": "All admitted checks and proposed TestProfiles use local resources only."
+        },
+        "fixed_test_profile_feasibility": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:quixbugs-topological-ordering:three-repetition-summary"
+          ],
+          "summary": "Execution used fixed absolute Python, cwd, argv, and an explicit cleared environment, or defines that same boundary for self-built work."
+        },
+        "crop_feasibility": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "execution:quixbugs-topological-ordering:three-repetition-summary"
+          ],
+          "summary": "Disposable probes established the target causal slice; conditional items retain a named B2.1 fidelity condition."
+        },
+        "final_gate": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "https://github.com/jkoppel/QuixBugs/blob/4257f44b0ff1181dedaedee6a447e133219fcebf/python_programs/topological_ordering.py",
+            "execution:quixbugs-topological-ordering:three-repetition-summary"
+          ],
+          "summary": "Gate follows the documented hard requirements and preserves conditional risks."
+        }
+      },
+      "final_gate": "CONDITIONAL",
+      "gate_reasons": [
+        "Buggy/correct execution is deterministic, but the formal oracle must replace exact-order assertions with edge-order semantics."
+      ],
+      "conditional_resolution": [
+        "B2.1 must prove a property-based oracle accepts alternate valid orders while retaining the original failure."
+      ],
+      "recommended_action": "RESOLVE_DURING_B2_1_BEFORE_ADMISSION",
+      "audited_at": "2026-07-16T00:00:00+08:00"
+    },
+    {
+      "candidate_id": "bugsinpy-black-21",
+      "preflight_schema_version": "1.0.0",
+      "source_kind": "BUGSINPY",
+      "original_audit_status": "ELIGIBLE",
+      "source_project": "psf/black",
+      "source_bug_id": "21",
+      "license": "MIT",
+      "license_status": "VERIFIED",
+      "attribution_requirements": "Retain the Black MIT copyright and permission notice.",
+      "buggy_revision": "c071af761e1550c6e4ebab8e5af747d2d8fdd48e",
+      "fixed_revision": "8e7848c63efe36f09e4651bece8c0efc34a1c3e1",
+      "source_evidence": [
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/black/bugs/21/bug.info"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/black/bugs/21/bug_patch.txt"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/psf/black/commit/8e7848c63efe36f09e4651bece8c0efc34a1c3e1"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/psf/black/blob/c071af761e1550c6e4ebab8e5af747d2d8fdd48e/LICENSE"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/psf/black/pull/126"
+        },
+        {
+          "kind": "EXECUTION_SUMMARY",
+          "reference": "execution:bugsinpy-black-21:three-repetition-summary"
+        }
+      ],
+      "source_checkout_verified": true,
+      "bug_fix_relation_verified": true,
+      "original_failure_reproduced": true,
+      "reference_fix_verified": true,
+      "failure_command": "python -X utf8=0 -c <bounded dump_to_file encoding probe>",
+      "passing_command": "python -X utf8=0 -c <same bounded dump_to_file encoding probe>",
+      "test_repetitions": 3,
+      "deterministic_result": true,
+      "minimum_test_runtime_ms": 842,
+      "maximum_test_runtime_ms": 1476,
+      "dependency_inventory": [
+        "Python 3.8.20 and 3.14.3",
+        "click 7.1.2",
+        "attrs 21.4.0"
+      ],
+      "dependency_install_required_for_source_audit": true,
+      "target_fixture_runtime_dependencies": [
+        "Python standard library",
+        "pre-provisioned pytest TestProfile"
+      ],
+      "network_required": false,
+      "external_service_required": false,
+      "database_required": false,
+      "native_build_required": false,
+      "python_3_14_status": "VERIFIED",
+      "windows_status": "VERIFIED",
+      "offline_status": "VERIFIED",
+      "fixed_test_profile_feasibility": true,
+      "crop_feasibility": "VERIFIED",
+      "crop_fidelity_risk": "LOW",
+      "required_source_files": [
+        "black.py"
+      ],
+      "required_test_files": [
+        "tests/test_diagnostics.py"
+      ],
+      "required_support_files": [
+        "blib2to3/",
+        "LICENSE"
+      ],
+      "expected_fixture_file_count": 6,
+      "expected_fixture_size_bytes": 240000,
+      "reference_patch_files": [
+        "black.py",
+        "tests/test_black.py"
+      ],
+      "reference_patch_lines": 4,
+      "reference_patch_changes_tests": true,
+      "reference_patch_changes_dependencies": false,
+      "visible_test_plan": "Trigger diagnostic-file creation with non-ASCII source under an explicitly non-UTF default encoding.",
+      "hidden_test_plan": "Cover emoji, CJK, ASCII, multiline diagnostics, reopen behavior, and preservation of caller content.",
+      "anti_hardcoding_plan": "Vary characters outside several legacy code pages and assert UTF-8 bytes plus round-trip content.",
+      "known_incorrect_patch_examples": [
+        "Drop non-ASCII characters before writing",
+        "Set an error handler that silently replaces characters"
+      ],
+      "protected_paths_plan": [
+        "tests/",
+        "task_manifest.json",
+        "LICENSE"
+      ],
+      "expected_edit_rounds": 1,
+      "difficulty_before": "BASIC",
+      "difficulty_after_preflight": "BASIC",
+      "difficulty_change_reason": "No change: execution scope, patch size, symptom distance, and hidden-test complexity support the M7-B1 label.",
+      "demo_suitability": "GOOD",
+      "primary_risks": [
+        "A crop limited to the temporary-file helper could lose formatter diagnostic context."
+      ],
+      "unresolved_questions": [],
+      "evidence_classification": {
+        "license_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/black/bugs/21/bug.info"
+          ],
+          "summary": "License text and attribution were checked at the pinned source revision."
+        },
+        "source_checkout_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/black/bugs/21/bug.info",
+            "execution:bugsinpy-black-21:three-repetition-summary"
+          ],
+          "summary": "Pinned public checkout was inspected, or the original self-built design boundary was reviewed."
+        },
+        "bug_fix_relation_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/black/bugs/21/bug.info",
+            "execution:bugsinpy-black-21:three-repetition-summary"
+          ],
+          "summary": "The public fix relation was executed or the self-built causal repair was closed at design level."
+        },
+        "original_failure_reproduced": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-black-21:three-repetition-summary"
+          ],
+          "summary": "Buggy state failed deterministically for public sources; self-built fixtures do not exist in B2.0."
+        },
+        "reference_fix_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-black-21:three-repetition-summary"
+          ],
+          "summary": "Fixed state passed deterministically for public sources; self-built repair remains a reviewed design."
+        },
+        "deterministic_result": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-black-21:three-repetition-summary"
+          ],
+          "summary": "Public checks were repeated three times; self-built determinism relies on the specified barrier/test design."
+        },
+        "python_3_14_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-black-21:three-repetition-summary"
+          ],
+          "summary": "Public target logic was exercised on Python 3.14; self-built compatibility is a standard-library design constraint."
+        },
+        "windows_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-black-21:three-repetition-summary"
+          ],
+          "summary": "Public probes ran on Windows; self-built platform behavior remains design-level."
+        },
+        "offline_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-black-21:three-repetition-summary"
+          ],
+          "summary": "All admitted checks and proposed TestProfiles use local resources only."
+        },
+        "fixed_test_profile_feasibility": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-black-21:three-repetition-summary"
+          ],
+          "summary": "Execution used fixed absolute Python, cwd, argv, and an explicit cleared environment, or defines that same boundary for self-built work."
+        },
+        "crop_feasibility": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-black-21:three-repetition-summary"
+          ],
+          "summary": "Disposable probes established the target causal slice; conditional items retain a named B2.1 fidelity condition."
+        },
+        "final_gate": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/black/bugs/21/bug.info",
+            "execution:bugsinpy-black-21:three-repetition-summary"
+          ],
+          "summary": "Gate follows the documented hard requirements and preserves conditional risks."
+        }
+      },
+      "final_gate": "GO",
+      "gate_reasons": [
+        "The exact source helper failed and fixed helper passed three times on both Python 3.8 and 3.14 under the Windows GBK default encoding."
+      ],
+      "conditional_resolution": [],
+      "recommended_action": "ENTER_B2_1_CONSTRUCTION",
+      "audited_at": "2026-07-16T00:00:00+08:00"
+    },
+    {
+      "candidate_id": "bugsinpy-pysnooper-3",
+      "preflight_schema_version": "1.0.0",
+      "source_kind": "BUGSINPY",
+      "original_audit_status": "ELIGIBLE",
+      "source_project": "cool-RR/PySnooper",
+      "source_bug_id": "3",
+      "license": "MIT",
+      "license_status": "VERIFIED",
+      "attribution_requirements": "Retain the PySnooper MIT copyright and permission notice.",
+      "buggy_revision": "6e3d797be3fa0a746fb5b1b7c7fea78eb926c208",
+      "fixed_revision": "15555ed760000b049aff8fecc79d29339c1224c3",
+      "source_evidence": [
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/PySnooper/bugs/3/bug.info"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/PySnooper/bugs/3/bug_patch.txt"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/cool-RR/PySnooper/commit/15555ed760000b049aff8fecc79d29339c1224c3"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/cool-RR/PySnooper/blob/6e3d797be3fa0a746fb5b1b7c7fea78eb926c208/LICENSE"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/cool-RR/PySnooper/issues/2"
+        },
+        {
+          "kind": "EXECUTION_SUMMARY",
+          "reference": "execution:bugsinpy-pysnooper-3:three-repetition-summary"
+        }
+      ],
+      "source_checkout_verified": true,
+      "bug_fix_relation_verified": true,
+      "original_failure_reproduced": true,
+      "reference_fix_verified": true,
+      "failure_command": "python -c <bounded file-writer closure probe>",
+      "passing_command": "python -c <same bounded file-writer closure probe>",
+      "test_repetitions": 3,
+      "deterministic_result": true,
+      "minimum_test_runtime_ms": 250,
+      "maximum_test_runtime_ms": 487,
+      "dependency_inventory": [
+        "Python 3.8.20 source audit",
+        "Python 3.14.3 AST crop probe",
+        "decorator 4.4.2",
+        "future 0.18.3",
+        "six 1.16.0"
+      ],
+      "dependency_install_required_for_source_audit": true,
+      "target_fixture_runtime_dependencies": [
+        "Python standard library",
+        "pre-provisioned pytest TestProfile"
+      ],
+      "network_required": false,
+      "external_service_required": false,
+      "database_required": false,
+      "native_build_required": false,
+      "python_3_14_status": "VERIFIED",
+      "windows_status": "VERIFIED",
+      "offline_status": "VERIFIED",
+      "fixed_test_profile_feasibility": true,
+      "crop_feasibility": "CONDITIONAL",
+      "crop_fidelity_risk": "MEDIUM",
+      "required_source_files": [
+        "pysnooper/pysnooper.py",
+        "pysnooper/tracer.py"
+      ],
+      "required_test_files": [
+        "tests/test_file_output.py"
+      ],
+      "required_support_files": [
+        "pysnooper/utils.py",
+        "pysnooper/pycompat.py",
+        "LICENSE"
+      ],
+      "expected_fixture_file_count": 8,
+      "expected_fixture_size_bytes": 42000,
+      "reference_patch_files": [
+        "pysnooper/pysnooper.py",
+        "tests/test_pysnooper.py"
+      ],
+      "reference_patch_lines": 30,
+      "reference_patch_changes_tests": true,
+      "reference_patch_changes_dependencies": false,
+      "visible_test_plan": "Decorate a function with file output and expose the downstream NameError rather than calling the writer factory directly.",
+      "hidden_test_plan": "Exercise pathlib and string paths, repeated writes, nested calls, Unicode output, and independent decorators.",
+      "anti_hardcoding_plan": "Keep the writer factory behind the decorator boundary and vary path representations and call counts.",
+      "known_incorrect_patch_examples": [
+        "Introduce a global output_path variable",
+        "Always write to a fixed temporary file"
+      ],
+      "protected_paths_plan": [
+        "tests/",
+        "task_manifest.json",
+        "LICENSE"
+      ],
+      "expected_edit_rounds": 1,
+      "difficulty_before": "BASIC",
+      "difficulty_after_preflight": "BASIC",
+      "difficulty_change_reason": "No change: execution scope, patch size, symptom distance, and hidden-test complexity support the M7-B1 label.",
+      "demo_suitability": "FAIR",
+      "primary_risks": [
+        "The source fix is a one-token variable change and can collapse into a toy if the tracer boundary is removed."
+      ],
+      "unresolved_questions": [
+        "Does the multi-module crop remain small enough while preserving downstream symptom distance?"
+      ],
+      "evidence_classification": {
+        "license_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/PySnooper/bugs/3/bug.info"
+          ],
+          "summary": "License text and attribution were checked at the pinned source revision."
+        },
+        "source_checkout_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/PySnooper/bugs/3/bug.info",
+            "execution:bugsinpy-pysnooper-3:three-repetition-summary"
+          ],
+          "summary": "Pinned public checkout was inspected, or the original self-built design boundary was reviewed."
+        },
+        "bug_fix_relation_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/PySnooper/bugs/3/bug.info",
+            "execution:bugsinpy-pysnooper-3:three-repetition-summary"
+          ],
+          "summary": "The public fix relation was executed or the self-built causal repair was closed at design level."
+        },
+        "original_failure_reproduced": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-pysnooper-3:three-repetition-summary"
+          ],
+          "summary": "Buggy state failed deterministically for public sources; self-built fixtures do not exist in B2.0."
+        },
+        "reference_fix_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-pysnooper-3:three-repetition-summary"
+          ],
+          "summary": "Fixed state passed deterministically for public sources; self-built repair remains a reviewed design."
+        },
+        "deterministic_result": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-pysnooper-3:three-repetition-summary"
+          ],
+          "summary": "Public checks were repeated three times; self-built determinism relies on the specified barrier/test design."
+        },
+        "python_3_14_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-pysnooper-3:three-repetition-summary"
+          ],
+          "summary": "Public target logic was exercised on Python 3.14; self-built compatibility is a standard-library design constraint."
+        },
+        "windows_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-pysnooper-3:three-repetition-summary"
+          ],
+          "summary": "Public probes ran on Windows; self-built platform behavior remains design-level."
+        },
+        "offline_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-pysnooper-3:three-repetition-summary"
+          ],
+          "summary": "All admitted checks and proposed TestProfiles use local resources only."
+        },
+        "fixed_test_profile_feasibility": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-pysnooper-3:three-repetition-summary"
+          ],
+          "summary": "Execution used fixed absolute Python, cwd, argv, and an explicit cleared environment, or defines that same boundary for self-built work."
+        },
+        "crop_feasibility": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "execution:bugsinpy-pysnooper-3:three-repetition-summary"
+          ],
+          "summary": "Disposable probes established the target causal slice; conditional items retain a named B2.1 fidelity condition."
+        },
+        "final_gate": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/PySnooper/bugs/3/bug.info",
+            "execution:bugsinpy-pysnooper-3:three-repetition-summary"
+          ],
+          "summary": "Gate follows the documented hard requirements and preserves conditional risks."
+        }
+      },
+      "final_gate": "CONDITIONAL",
+      "gate_reasons": [
+        "Exact source failure/fix is deterministic on Python 3.8 and the extracted target function is deterministic on 3.14; engineering crop fidelity remains unresolved."
+      ],
+      "conditional_resolution": [
+        "B2.1 must retain decorator, tracer, writer, and compatibility module boundaries and prove the visible test does not expose the closure variable."
+      ],
+      "recommended_action": "RESOLVE_DURING_B2_1_BEFORE_ADMISSION",
+      "audited_at": "2026-07-16T00:00:00+08:00"
+    },
+    {
+      "candidate_id": "bugsinpy-httpie-4",
+      "preflight_schema_version": "1.0.0",
+      "source_kind": "BUGSINPY",
+      "original_audit_status": "ELIGIBLE",
+      "source_project": "httpie/cli",
+      "source_bug_id": "4",
+      "license": "BSD-3-Clause",
+      "license_status": "VERIFIED",
+      "attribution_requirements": "Retain the HTTPie BSD copyright, conditions, disclaimer, and non-endorsement term.",
+      "buggy_revision": "8c892edd4fe700a7ca5cc733dcb4817831d253e2",
+      "fixed_revision": "040d981f00c3f6830b2d0db3daf3c64c080e96e3",
+      "source_evidence": [
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/httpie/bugs/4/bug.info"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/httpie/bugs/4/bug_patch.txt"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/httpie/cli/commit/040d981f00c3f6830b2d0db3daf3c64c080e96e3"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/httpie/cli/blob/8c892edd4fe700a7ca5cc733dcb4817831d253e2/LICENSE"
+        },
+        {
+          "kind": "EXECUTION_SUMMARY",
+          "reference": "execution:bugsinpy-httpie-4:three-repetition-summary"
+        }
+      ],
+      "source_checkout_verified": true,
+      "bug_fix_relation_verified": true,
+      "original_failure_reproduced": true,
+      "reference_fix_verified": true,
+      "failure_command": "python -c <offline prepared-request header probe>",
+      "passing_command": "python -c <same offline prepared-request header probe>",
+      "test_repetitions": 3,
+      "deterministic_result": true,
+      "minimum_test_runtime_ms": 206,
+      "maximum_test_runtime_ms": 908,
+      "dependency_inventory": [
+        "Python 3.8.20",
+        "Requests 2.4.3 for source audit",
+        "Python 3.14.3 dependency-free crop probe"
+      ],
+      "dependency_install_required_for_source_audit": true,
+      "target_fixture_runtime_dependencies": [
+        "Python standard library",
+        "pre-provisioned pytest TestProfile"
+      ],
+      "network_required": false,
+      "external_service_required": false,
+      "database_required": false,
+      "native_build_required": false,
+      "python_3_14_status": "VERIFIED",
+      "windows_status": "VERIFIED",
+      "offline_status": "VERIFIED",
+      "fixed_test_profile_feasibility": true,
+      "crop_feasibility": "CONDITIONAL",
+      "crop_fidelity_risk": "MEDIUM",
+      "required_source_files": [
+        "httpie/models.py"
+      ],
+      "required_test_files": [
+        "tests/test_request_headers.py"
+      ],
+      "required_support_files": [
+        "httpie/compat.py",
+        "support/case_insensitive_headers.py",
+        "LICENSE"
+      ],
+      "expected_fixture_file_count": 7,
+      "expected_fixture_size_bytes": 34000,
+      "reference_patch_files": [
+        "httpie/models.py",
+        "tests/test_regressions.py"
+      ],
+      "reference_patch_lines": 21,
+      "reference_patch_changes_tests": true,
+      "reference_patch_changes_dependencies": false,
+      "visible_test_plan": "Render a prepared request with a lowercase custom host and reveal duplicate logical headers without making a network request.",
+      "hidden_test_plan": "Vary header casing, ports, userinfo, duplicate logical keys, unrelated headers, and absent Host values.",
+      "anti_hardcoding_plan": "Use a faithful case-insensitive mapping and assert logical header cardinality and preserved user value across permutations.",
+      "known_incorrect_patch_examples": [
+        "Delete every generated Host header",
+        "Lowercase all rendered header values"
+      ],
+      "protected_paths_plan": [
+        "tests/",
+        "support/case_insensitive_headers.py",
+        "task_manifest.json",
+        "LICENSE"
+      ],
+      "expected_edit_rounds": 1,
+      "difficulty_before": "BASIC",
+      "difficulty_after_preflight": "BASIC",
+      "difficulty_change_reason": "No change: execution scope, patch size, symptom distance, and hidden-test complexity support the M7-B1 label.",
+      "demo_suitability": "GOOD",
+      "primary_risks": [
+        "The upstream regression test performs DNS and HTTP; the offline crop replaces Requests with a bounded compatible mapping."
+      ],
+      "unresolved_questions": [
+        "Is the local support mapping faithful enough to preserve the original mapping-copy bug without shipping Requests?"
+      ],
+      "evidence_classification": {
+        "license_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/httpie/bugs/4/bug.info"
+          ],
+          "summary": "License text and attribution were checked at the pinned source revision."
+        },
+        "source_checkout_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/httpie/bugs/4/bug.info",
+            "execution:bugsinpy-httpie-4:three-repetition-summary"
+          ],
+          "summary": "Pinned public checkout was inspected, or the original self-built design boundary was reviewed."
+        },
+        "bug_fix_relation_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/httpie/bugs/4/bug.info",
+            "execution:bugsinpy-httpie-4:three-repetition-summary"
+          ],
+          "summary": "The public fix relation was executed or the self-built causal repair was closed at design level."
+        },
+        "original_failure_reproduced": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-httpie-4:three-repetition-summary"
+          ],
+          "summary": "Buggy state failed deterministically for public sources; self-built fixtures do not exist in B2.0."
+        },
+        "reference_fix_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-httpie-4:three-repetition-summary"
+          ],
+          "summary": "Fixed state passed deterministically for public sources; self-built repair remains a reviewed design."
+        },
+        "deterministic_result": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-httpie-4:three-repetition-summary"
+          ],
+          "summary": "Public checks were repeated three times; self-built determinism relies on the specified barrier/test design."
+        },
+        "python_3_14_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-httpie-4:three-repetition-summary"
+          ],
+          "summary": "Public target logic was exercised on Python 3.14; self-built compatibility is a standard-library design constraint."
+        },
+        "windows_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-httpie-4:three-repetition-summary"
+          ],
+          "summary": "Public probes ran on Windows; self-built platform behavior remains design-level."
+        },
+        "offline_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-httpie-4:three-repetition-summary"
+          ],
+          "summary": "All admitted checks and proposed TestProfiles use local resources only."
+        },
+        "fixed_test_profile_feasibility": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:bugsinpy-httpie-4:three-repetition-summary"
+          ],
+          "summary": "Execution used fixed absolute Python, cwd, argv, and an explicit cleared environment, or defines that same boundary for self-built work."
+        },
+        "crop_feasibility": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "execution:bugsinpy-httpie-4:three-repetition-summary"
+          ],
+          "summary": "Disposable probes established the target causal slice; conditional items retain a named B2.1 fidelity condition."
+        },
+        "final_gate": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "https://github.com/soarsmu/BugsInPy/blob/11c5f1eea954a42132cfd06bf257766a7963e0fd/projects/httpie/bugs/4/bug.info",
+            "execution:bugsinpy-httpie-4:three-repetition-summary"
+          ],
+          "summary": "Gate follows the documented hard requirements and preserves conditional risks."
+        }
+      },
+      "final_gate": "CONDITIONAL",
+      "gate_reasons": [
+        "Exact source class separates buggy/fixed under Requests 2.4.3, and the 3.14 offline spike preserves case-insensitive semantics; dependency replacement fidelity needs one formal review."
+      ],
+      "conditional_resolution": [
+        "B2.1 must compare the local mapping contract against Requests CaseInsensitiveDict for membership, iteration, and duplicate-key behavior."
+      ],
+      "recommended_action": "RESOLVE_DURING_B2_1_BEFORE_ADMISSION",
+      "audited_at": "2026-07-16T00:00:00+08:00"
+    },
+    {
+      "candidate_id": "swebench-flask-5014",
+      "preflight_schema_version": "1.0.0",
+      "source_kind": "SWE_BENCH",
+      "original_audit_status": "ELIGIBLE",
+      "source_project": "pallets/flask",
+      "source_bug_id": "pallets__flask-5014",
+      "license": "BSD-3-Clause",
+      "license_status": "VERIFIED",
+      "attribution_requirements": "Retain the Flask BSD copyright, conditions, disclaimer, and non-endorsement term.",
+      "buggy_revision": "7ee9ceb71e868944a46e1ff00b506772a53a4f1d",
+      "fixed_revision": "7ed89d3f9d2207c9a607f5dcdce106c0278e1332",
+      "source_evidence": [
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/pallets/flask/issues/5010"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/pallets/flask/pull/5014"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/pallets/flask/commit/7ed89d3f9d2207c9a607f5dcdce106c0278e1332"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/pallets/flask/blob/7ee9ceb71e868944a46e1ff00b506772a53a4f1d/LICENSE.rst"
+        },
+        {
+          "kind": "EXECUTION_SUMMARY",
+          "reference": "execution:swebench-flask-5014:three-repetition-summary"
+        }
+      ],
+      "source_checkout_verified": true,
+      "bug_fix_relation_verified": true,
+      "original_failure_reproduced": true,
+      "reference_fix_verified": true,
+      "failure_command": "python -m pytest tests/test_blueprints.py::test_empty_name_not_allowed -q",
+      "passing_command": "python -m pytest tests/test_blueprints.py::test_empty_name_not_allowed -q",
+      "test_repetitions": 3,
+      "deterministic_result": true,
+      "minimum_test_runtime_ms": 1168,
+      "maximum_test_runtime_ms": 2484,
+      "dependency_inventory": [
+        "Python 3.10.20 source test",
+        "Python 3.14.3 direct source probe",
+        "Flask declared runtime dependencies"
+      ],
+      "dependency_install_required_for_source_audit": true,
+      "target_fixture_runtime_dependencies": [
+        "Python standard library",
+        "pre-provisioned pytest TestProfile"
+      ],
+      "network_required": false,
+      "external_service_required": false,
+      "database_required": false,
+      "native_build_required": false,
+      "python_3_14_status": "VERIFIED",
+      "windows_status": "VERIFIED",
+      "offline_status": "VERIFIED",
+      "fixed_test_profile_feasibility": true,
+      "crop_feasibility": "VERIFIED",
+      "crop_fidelity_risk": "LOW",
+      "required_source_files": [
+        "src/flask/blueprints.py",
+        "src/flask/scaffold.py"
+      ],
+      "required_test_files": [
+        "tests/test_blueprints.py"
+      ],
+      "required_support_files": [
+        "src/flask/__init__.py",
+        "LICENSE.rst"
+      ],
+      "expected_fixture_file_count": 9,
+      "expected_fixture_size_bytes": 105000,
+      "reference_patch_files": [
+        "CHANGES.rst",
+        "src/flask/blueprints.py",
+        "tests/test_blueprints.py"
+      ],
+      "reference_patch_lines": 10,
+      "reference_patch_changes_tests": true,
+      "reference_patch_changes_dependencies": false,
+      "visible_test_plan": "Attempt registration of an invalid blueprint through a small application boundary and assert a controlled error.",
+      "hidden_test_plan": "Cover empty, valid Unicode, dotted, nested, duplicate, and non-string names without requiring the exact upstream message.",
+      "anti_hardcoding_plan": "Keep direct constructor-only edge cases hidden and validate the registration invariant through several call paths.",
+      "known_incorrect_patch_examples": [
+        "Reject every false-like object after converting valid names",
+        "Silently replace an empty name with a default"
+      ],
+      "protected_paths_plan": [
+        "tests/",
+        "task_manifest.json",
+        "LICENSE.rst"
+      ],
+      "expected_edit_rounds": 1,
+      "difficulty_before": "BASIC",
+      "difficulty_after_preflight": "BASIC",
+      "difficulty_change_reason": "No change: execution scope, patch size, symptom distance, and hidden-test complexity support the M7-B1 label.",
+      "demo_suitability": "GOOD",
+      "primary_risks": [
+        "A constructor-only visible test would reveal the validation location too directly."
+      ],
+      "unresolved_questions": [],
+      "evidence_classification": {
+        "license_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified"
+          ],
+          "summary": "License text and attribution were checked at the pinned source revision."
+        },
+        "source_checkout_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified",
+            "execution:swebench-flask-5014:three-repetition-summary"
+          ],
+          "summary": "Pinned public checkout was inspected, or the original self-built design boundary was reviewed."
+        },
+        "bug_fix_relation_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified",
+            "execution:swebench-flask-5014:three-repetition-summary"
+          ],
+          "summary": "The public fix relation was executed or the self-built causal repair was closed at design level."
+        },
+        "original_failure_reproduced": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:swebench-flask-5014:three-repetition-summary"
+          ],
+          "summary": "Buggy state failed deterministically for public sources; self-built fixtures do not exist in B2.0."
+        },
+        "reference_fix_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:swebench-flask-5014:three-repetition-summary"
+          ],
+          "summary": "Fixed state passed deterministically for public sources; self-built repair remains a reviewed design."
+        },
+        "deterministic_result": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:swebench-flask-5014:three-repetition-summary"
+          ],
+          "summary": "Public checks were repeated three times; self-built determinism relies on the specified barrier/test design."
+        },
+        "python_3_14_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:swebench-flask-5014:three-repetition-summary"
+          ],
+          "summary": "Public target logic was exercised on Python 3.14; self-built compatibility is a standard-library design constraint."
+        },
+        "windows_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:swebench-flask-5014:three-repetition-summary"
+          ],
+          "summary": "Public probes ran on Windows; self-built platform behavior remains design-level."
+        },
+        "offline_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:swebench-flask-5014:three-repetition-summary"
+          ],
+          "summary": "All admitted checks and proposed TestProfiles use local resources only."
+        },
+        "fixed_test_profile_feasibility": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:swebench-flask-5014:three-repetition-summary"
+          ],
+          "summary": "Execution used fixed absolute Python, cwd, argv, and an explicit cleared environment, or defines that same boundary for self-built work."
+        },
+        "crop_feasibility": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:swebench-flask-5014:three-repetition-summary"
+          ],
+          "summary": "Disposable probes established the target causal slice; conditional items retain a named B2.1 fidelity condition."
+        },
+        "final_gate": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified",
+            "execution:swebench-flask-5014:three-repetition-summary"
+          ],
+          "summary": "Gate follows the documented hard requirements and preserves conditional risks."
+        }
+      },
+      "final_gate": "GO",
+      "gate_reasons": [
+        "The official added regression fails on the base and passes on the merge three times under Python 3.10; direct source behavior also separates three times under Python 3.14."
+      ],
+      "conditional_resolution": [],
+      "recommended_action": "ENTER_B2_1_CONSTRUCTION",
+      "audited_at": "2026-07-16T00:00:00+08:00"
+    },
+    {
+      "candidate_id": "swebench-pytest-10051",
+      "preflight_schema_version": "1.0.0",
+      "source_kind": "SWE_BENCH",
+      "original_audit_status": "ELIGIBLE",
+      "source_project": "pytest-dev/pytest",
+      "source_bug_id": "pytest-dev__pytest-10051",
+      "license": "MIT",
+      "license_status": "VERIFIED",
+      "attribution_requirements": "Retain the pytest MIT copyright and permission notice.",
+      "buggy_revision": "aa55975c7d3f6c9f6d7f68accc41bb7cadf0eb9a",
+      "fixed_revision": "966d4fb3e4640de721f87e4190427975ea020c67",
+      "source_evidence": [
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/pytest-dev/pytest/issues/9877"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/pytest-dev/pytest/pull/10051"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/pytest-dev/pytest/commit/966d4fb3e4640de721f87e4190427975ea020c67"
+        },
+        {
+          "kind": "FIRST_PARTY",
+          "reference": "https://github.com/pytest-dev/pytest/blob/aa55975c7d3f6c9f6d7f68accc41bb7cadf0eb9a/LICENSE"
+        },
+        {
+          "kind": "EXECUTION_SUMMARY",
+          "reference": "execution:swebench-pytest-10051:three-repetition-summary"
+        }
+      ],
+      "source_checkout_verified": true,
+      "bug_fix_relation_verified": true,
+      "original_failure_reproduced": true,
+      "reference_fix_verified": true,
+      "failure_command": "python -m pytest testing/logging/test_fixture.py::test_clear_for_call_stage -q",
+      "passing_command": "python -m pytest testing/logging/test_fixture.py::test_clear_for_call_stage -q",
+      "test_repetitions": 3,
+      "deterministic_result": true,
+      "minimum_test_runtime_ms": 918,
+      "maximum_test_runtime_ms": 1608,
+      "dependency_inventory": [
+        "Python 3.10.20 source test",
+        "Python 3.14.3 lifecycle probe",
+        "pytest source dependencies"
+      ],
+      "dependency_install_required_for_source_audit": true,
+      "target_fixture_runtime_dependencies": [
+        "Python standard library",
+        "pre-provisioned pytest TestProfile"
+      ],
+      "network_required": false,
+      "external_service_required": false,
+      "database_required": false,
+      "native_build_required": false,
+      "python_3_14_status": "VERIFIED",
+      "windows_status": "VERIFIED",
+      "offline_status": "VERIFIED",
+      "fixed_test_profile_feasibility": true,
+      "crop_feasibility": "VERIFIED",
+      "crop_fidelity_risk": "LOW",
+      "required_source_files": [
+        "src/_pytest/logging.py",
+        "src/_pytest/stash.py"
+      ],
+      "required_test_files": [
+        "testing/logging/test_fixture.py"
+      ],
+      "required_support_files": [
+        "src/_pytest/nodes.py",
+        "LICENSE"
+      ],
+      "expected_fixture_file_count": 8,
+      "expected_fixture_size_bytes": 95000,
+      "reference_patch_files": [
+        "src/_pytest/logging.py",
+        "testing/logging/test_fixture.py",
+        "changelog/9877.bugfix.rst",
+        "AUTHORS"
+      ],
+      "reference_patch_lines": 28,
+      "reference_patch_changes_tests": true,
+      "reference_patch_changes_dependencies": false,
+      "visible_test_plan": "Capture one phase, clear during call, and reveal that externally stored phase records remain stale.",
+      "hidden_test_plan": "Clear in setup/call/teardown, clear twice, log after clear, retain phase isolation, and check list identity across a lifecycle boundary.",
+      "anti_hardcoding_plan": "Assert semantic phase contents and reference identity through multiple interleavings rather than matching the upstream method body.",
+      "known_incorrect_patch_examples": [
+        "Delete the phase key from the stash",
+        "Replace every phase record list when clearing"
+      ],
+      "protected_paths_plan": [
+        "tests/",
+        "task_manifest.json",
+        "LICENSE"
+      ],
+      "expected_edit_rounds": 2,
+      "difficulty_before": "ENGINEERING",
+      "difficulty_after_preflight": "ENGINEERING",
+      "difficulty_change_reason": "No change: execution scope, patch size, symptom distance, and hidden-test complexity support the M7-B1 label.",
+      "demo_suitability": "EXCELLENT",
+      "primary_risks": [
+        "The merge commit contains unrelated changes, so B2.1 must use the PR first-parent diff rather than the broad SWE base-to-merge diff."
+      ],
+      "unresolved_questions": [],
+      "evidence_classification": {
+        "license_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified"
+          ],
+          "summary": "License text and attribution were checked at the pinned source revision."
+        },
+        "source_checkout_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified",
+            "execution:swebench-pytest-10051:three-repetition-summary"
+          ],
+          "summary": "Pinned public checkout was inspected, or the original self-built design boundary was reviewed."
+        },
+        "bug_fix_relation_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified",
+            "execution:swebench-pytest-10051:three-repetition-summary"
+          ],
+          "summary": "The public fix relation was executed or the self-built causal repair was closed at design level."
+        },
+        "original_failure_reproduced": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:swebench-pytest-10051:three-repetition-summary"
+          ],
+          "summary": "Buggy state failed deterministically for public sources; self-built fixtures do not exist in B2.0."
+        },
+        "reference_fix_verified": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:swebench-pytest-10051:three-repetition-summary"
+          ],
+          "summary": "Fixed state passed deterministically for public sources; self-built repair remains a reviewed design."
+        },
+        "deterministic_result": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:swebench-pytest-10051:three-repetition-summary"
+          ],
+          "summary": "Public checks were repeated three times; self-built determinism relies on the specified barrier/test design."
+        },
+        "python_3_14_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:swebench-pytest-10051:three-repetition-summary"
+          ],
+          "summary": "Public target logic was exercised on Python 3.14; self-built compatibility is a standard-library design constraint."
+        },
+        "windows_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:swebench-pytest-10051:three-repetition-summary"
+          ],
+          "summary": "Public probes ran on Windows; self-built platform behavior remains design-level."
+        },
+        "offline_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:swebench-pytest-10051:three-repetition-summary"
+          ],
+          "summary": "All admitted checks and proposed TestProfiles use local resources only."
+        },
+        "fixed_test_profile_feasibility": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:swebench-pytest-10051:three-repetition-summary"
+          ],
+          "summary": "Execution used fixed absolute Python, cwd, argv, and an explicit cleared environment, or defines that same boundary for self-built work."
+        },
+        "crop_feasibility": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "execution:swebench-pytest-10051:three-repetition-summary"
+          ],
+          "summary": "Disposable probes established the target causal slice; conditional items retain a named B2.1 fidelity condition."
+        },
+        "final_gate": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified",
+            "execution:swebench-pytest-10051:three-repetition-summary"
+          ],
+          "summary": "Gate follows the documented hard requirements and preserves conditional risks."
+        }
+      },
+      "final_gate": "GO",
+      "gate_reasons": [
+        "The official PR regression fails/passes three times in isolated source installations on Python 3.10; a direct lifecycle probe repeats the same aliasing distinction on Python 3.14."
+      ],
+      "conditional_resolution": [],
+      "recommended_action": "ENTER_B2_1_CONSTRUCTION",
+      "audited_at": "2026-07-16T00:00:00+08:00"
+    },
+    {
+      "candidate_id": "self-durable-double-consumption",
+      "preflight_schema_version": "1.0.0",
+      "source_kind": "SELF_BUILT",
+      "original_audit_status": "ELIGIBLE",
+      "source_project": "AgentForge original evaluation design",
+      "source_bug_id": "self-durable-double-consumption",
+      "license": "N/A - original design concept; code not yet authored",
+      "license_status": "VERIFIED",
+      "attribution_requirements": "No third-party code exists; B2.1 must author an original fixture and record AgentForge project ownership.",
+      "buggy_revision": null,
+      "fixed_revision": null,
+      "source_evidence": [
+        {
+          "kind": "ORIGINAL_DESIGN",
+          "reference": "design:self-durable-double-consumption:preflight"
+        },
+        {
+          "kind": "USER_VISIBLE_SYMPTOM",
+          "reference": "A customer sees a duplicate dispatch notification after the service restarts during handoff."
+        },
+        {
+          "kind": "CORE_INVARIANT",
+          "reference": "A command receipt and its externally visible dispatch record become durable as one logical transition, and completed results are reused."
+        },
+        {
+          "kind": "BUGGY_MECHANISM",
+          "reference": "The dispatcher persists the visible dispatch before advancing the durable receipt cursor, allowing restart to repeat the effect."
+        },
+        {
+          "kind": "REPAIR_PRINCIPLE",
+          "reference": "Use a conditional receipt claim plus durable result reuse so restart observes completion before attempting another dispatch."
+        }
+      ],
+      "source_checkout_verified": false,
+      "bug_fix_relation_verified": false,
+      "original_failure_reproduced": false,
+      "reference_fix_verified": false,
+      "failure_command": null,
+      "passing_command": null,
+      "test_repetitions": 0,
+      "deterministic_result": true,
+      "minimum_test_runtime_ms": 0,
+      "maximum_test_runtime_ms": 0,
+      "dependency_inventory": [
+        "Python 3.14 standard library",
+        "pytest from immutable TestProfile"
+      ],
+      "dependency_install_required_for_source_audit": false,
+      "target_fixture_runtime_dependencies": [
+        "Python standard library",
+        "pre-provisioned pytest TestProfile"
+      ],
+      "network_required": false,
+      "external_service_required": false,
+      "database_required": false,
+      "native_build_required": false,
+      "python_3_14_status": "INFERRED",
+      "windows_status": "INFERRED",
+      "offline_status": "VERIFIED",
+      "fixed_test_profile_feasibility": true,
+      "crop_feasibility": "VERIFIED",
+      "crop_fidelity_risk": "LOW",
+      "required_source_files": [
+        "parcel_flow/models.py",
+        "parcel_flow/store.py",
+        "parcel_flow/dispatcher.py",
+        "parcel_flow/service.py"
+      ],
+      "required_test_files": [
+        "tests/test_visible_behavior.py",
+        "hidden/test_invariants.py"
+      ],
+      "required_support_files": [
+        "task_manifest.json",
+        "README.md"
+      ],
+      "expected_fixture_file_count": 8,
+      "expected_fixture_size_bytes": 48000,
+      "reference_patch_files": [],
+      "reference_patch_lines": 0,
+      "reference_patch_changes_tests": false,
+      "reference_patch_changes_dependencies": false,
+      "visible_test_plan": "Show ordinary processing plus one restart that produces duplicate customer-visible dispatches; do not name idempotency, resume, or the crash window.",
+      "hidden_test_plan": "Cover first processing, restart recovery, repeated resume, completed-result reuse, stale claims, and a barrier-controlled concurrent compare-and-set boundary.",
+      "anti_hardcoding_plan": "Generate command IDs and restart points, inspect durable receipts and dispatch ledger, and reject fixes that suppress all second starts.",
+      "known_incorrect_patch_examples": [
+        "Keep an in-memory set of processed IDs",
+        "Mark the receipt complete before the dispatch is durably recorded",
+        "Ignore every command after any restart"
+      ],
+      "protected_paths_plan": [
+        "tests/",
+        "reference/",
+        "task_manifest.json",
+        "schema/"
+      ],
+      "expected_edit_rounds": 2,
+      "difficulty_before": "ENGINEERING",
+      "difficulty_after_preflight": "ENGINEERING",
+      "difficulty_change_reason": "No change: module count, causal distance, feedback rounds, and hidden interleavings support the original label.",
+      "demo_suitability": "EXCELLENT",
+      "primary_risks": [
+        "The design could leak AgentForge concepts unless parcel-domain names and independently authored tests are enforced."
+      ],
+      "unresolved_questions": [],
+      "evidence_classification": {
+        "license_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "design:self-durable-double-consumption:preflight"
+          ],
+          "summary": "License text and attribution were checked at the pinned source revision."
+        },
+        "source_checkout_verified": {
+          "status": "UNVERIFIED",
+          "evidence_refs": [
+            "design:self-durable-double-consumption:preflight",
+            "design:self-durable-double-consumption:preflight"
+          ],
+          "summary": "Pinned public checkout was inspected, or the original self-built design boundary was reviewed."
+        },
+        "bug_fix_relation_verified": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "design:self-durable-double-consumption:preflight",
+            "design:self-durable-double-consumption:preflight"
+          ],
+          "summary": "The public fix relation was executed or the self-built causal repair was closed at design level."
+        },
+        "original_failure_reproduced": {
+          "status": "UNVERIFIED",
+          "evidence_refs": [
+            "design:self-durable-double-consumption:preflight"
+          ],
+          "summary": "Buggy state failed deterministically for public sources; self-built fixtures do not exist in B2.0."
+        },
+        "reference_fix_verified": {
+          "status": "UNVERIFIED",
+          "evidence_refs": [
+            "design:self-durable-double-consumption:preflight"
+          ],
+          "summary": "Fixed state passed deterministically for public sources; self-built repair remains a reviewed design."
+        },
+        "deterministic_result": {
+          "status": "UNVERIFIED",
+          "evidence_refs": [
+            "design:self-durable-double-consumption:preflight"
+          ],
+          "summary": "Public checks were repeated three times; self-built determinism relies on the specified barrier/test design."
+        },
+        "python_3_14_status": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "design:self-durable-double-consumption:preflight"
+          ],
+          "summary": "Public target logic was exercised on Python 3.14; self-built compatibility is a standard-library design constraint."
+        },
+        "windows_status": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "design:self-durable-double-consumption:preflight"
+          ],
+          "summary": "Public probes ran on Windows; self-built platform behavior remains design-level."
+        },
+        "offline_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "design:self-durable-double-consumption:preflight"
+          ],
+          "summary": "All admitted checks and proposed TestProfiles use local resources only."
+        },
+        "fixed_test_profile_feasibility": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "design:self-durable-double-consumption:preflight"
+          ],
+          "summary": "Execution used fixed absolute Python, cwd, argv, and an explicit cleared environment, or defines that same boundary for self-built work."
+        },
+        "crop_feasibility": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "design:self-durable-double-consumption:preflight"
+          ],
+          "summary": "Disposable probes established the target causal slice; conditional items retain a named B2.1 fidelity condition."
+        },
+        "final_gate": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "design:self-durable-double-consumption:preflight",
+            "design:self-durable-double-consumption:preflight"
+          ],
+          "summary": "Gate follows the documented hard requirements and preserves conditional risks."
+        }
+      },
+      "final_gate": "GO",
+      "gate_reasons": [
+        "The design closes symptom, four-module causality, durable invariants, two-round repair path, hidden crash/concurrency matrix, and leakage controls without copying AgentForge names."
+      ],
+      "conditional_resolution": [],
+      "recommended_action": "ENTER_B2_1_CONSTRUCTION",
+      "audited_at": "2026-07-16T00:00:00+08:00"
+    },
+    {
+      "candidate_id": "self-policy-priority-shadow",
+      "preflight_schema_version": "1.0.0",
+      "source_kind": "SELF_BUILT",
+      "original_audit_status": "ELIGIBLE",
+      "source_project": "AgentForge original evaluation design",
+      "source_bug_id": "self-policy-priority-shadow",
+      "license": "N/A - original design concept; code not yet authored",
+      "license_status": "VERIFIED",
+      "attribution_requirements": "No third-party code exists; B2.1 must author an original fixture and record AgentForge project ownership.",
+      "buggy_revision": null,
+      "fixed_revision": null,
+      "source_evidence": [
+        {
+          "kind": "ORIGINAL_DESIGN",
+          "reference": "design:self-policy-priority-shadow:preflight"
+        },
+        {
+          "kind": "USER_VISIBLE_SYMPTOM",
+          "reference": "A narrow safety restriction is ignored when a broad route rule also matches the same request."
+        },
+        {
+          "kind": "CORE_INVARIANT",
+          "reference": "Rule ranking is deterministic and applies specificity, explicit effect severity, and stable tie-breaking before producing an explanation."
+        },
+        {
+          "kind": "BUGGY_MECHANISM",
+          "reference": "The matcher returns the first prefix match before the ranker compares the full candidate set."
+        },
+        {
+          "kind": "REPAIR_PRINCIPLE",
+          "reference": "Collect all matching rules and apply the declared ranking tuple centrally before rendering the decision explanation."
+        }
+      ],
+      "source_checkout_verified": false,
+      "bug_fix_relation_verified": false,
+      "original_failure_reproduced": false,
+      "reference_fix_verified": false,
+      "failure_command": null,
+      "passing_command": null,
+      "test_repetitions": 0,
+      "deterministic_result": true,
+      "minimum_test_runtime_ms": 0,
+      "maximum_test_runtime_ms": 0,
+      "dependency_inventory": [
+        "Python 3.14 standard library",
+        "pytest from immutable TestProfile"
+      ],
+      "dependency_install_required_for_source_audit": false,
+      "target_fixture_runtime_dependencies": [
+        "Python standard library",
+        "pre-provisioned pytest TestProfile"
+      ],
+      "network_required": false,
+      "external_service_required": false,
+      "database_required": false,
+      "native_build_required": false,
+      "python_3_14_status": "INFERRED",
+      "windows_status": "INFERRED",
+      "offline_status": "VERIFIED",
+      "fixed_test_profile_feasibility": true,
+      "crop_feasibility": "VERIFIED",
+      "crop_fidelity_risk": "LOW",
+      "required_source_files": [
+        "route_rules/models.py",
+        "route_rules/matcher.py",
+        "route_rules/ranker.py",
+        "route_rules/service.py"
+      ],
+      "required_test_files": [
+        "tests/test_visible_behavior.py",
+        "hidden/test_invariants.py"
+      ],
+      "required_support_files": [
+        "task_manifest.json",
+        "README.md"
+      ],
+      "expected_fixture_file_count": 8,
+      "expected_fixture_size_bytes": 48000,
+      "reference_patch_files": [],
+      "reference_patch_lines": 0,
+      "reference_patch_changes_tests": false,
+      "reference_patch_changes_dependencies": false,
+      "visible_test_plan": "Expose a broad allow and one unrelated restriction; keep the decisive overlapping prefix combination hidden.",
+      "hidden_test_plan": "Permute configuration order and cover overlapping prefixes, equal specificity, explicit restrictions, approval-like intermediate effects, and unknown resources.",
+      "anti_hardcoding_plan": "Randomize rule order deterministically and compare decisions with an independent ranking oracle.",
+      "known_incorrect_patch_examples": [
+        "Always choose the longest string regardless of effect",
+        "Sort the configuration once but keep early return in the matcher"
+      ],
+      "protected_paths_plan": [
+        "tests/",
+        "reference/",
+        "task_manifest.json",
+        "fixtures/rules.json"
+      ],
+      "expected_edit_rounds": 2,
+      "difficulty_before": "ENGINEERING",
+      "difficulty_after_preflight": "ENGINEERING",
+      "difficulty_change_reason": "No change: module count, causal distance, feedback rounds, and hidden interleavings support the original label.",
+      "demo_suitability": "GOOD",
+      "primary_risks": [
+        "The domain overlaps policy engines; terminology and data model must remain independent from AgentForge."
+      ],
+      "unresolved_questions": [],
+      "evidence_classification": {
+        "license_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "design:self-policy-priority-shadow:preflight"
+          ],
+          "summary": "License text and attribution were checked at the pinned source revision."
+        },
+        "source_checkout_verified": {
+          "status": "UNVERIFIED",
+          "evidence_refs": [
+            "design:self-policy-priority-shadow:preflight",
+            "design:self-policy-priority-shadow:preflight"
+          ],
+          "summary": "Pinned public checkout was inspected, or the original self-built design boundary was reviewed."
+        },
+        "bug_fix_relation_verified": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "design:self-policy-priority-shadow:preflight",
+            "design:self-policy-priority-shadow:preflight"
+          ],
+          "summary": "The public fix relation was executed or the self-built causal repair was closed at design level."
+        },
+        "original_failure_reproduced": {
+          "status": "UNVERIFIED",
+          "evidence_refs": [
+            "design:self-policy-priority-shadow:preflight"
+          ],
+          "summary": "Buggy state failed deterministically for public sources; self-built fixtures do not exist in B2.0."
+        },
+        "reference_fix_verified": {
+          "status": "UNVERIFIED",
+          "evidence_refs": [
+            "design:self-policy-priority-shadow:preflight"
+          ],
+          "summary": "Fixed state passed deterministically for public sources; self-built repair remains a reviewed design."
+        },
+        "deterministic_result": {
+          "status": "UNVERIFIED",
+          "evidence_refs": [
+            "design:self-policy-priority-shadow:preflight"
+          ],
+          "summary": "Public checks were repeated three times; self-built determinism relies on the specified barrier/test design."
+        },
+        "python_3_14_status": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "design:self-policy-priority-shadow:preflight"
+          ],
+          "summary": "Public target logic was exercised on Python 3.14; self-built compatibility is a standard-library design constraint."
+        },
+        "windows_status": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "design:self-policy-priority-shadow:preflight"
+          ],
+          "summary": "Public probes ran on Windows; self-built platform behavior remains design-level."
+        },
+        "offline_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "design:self-policy-priority-shadow:preflight"
+          ],
+          "summary": "All admitted checks and proposed TestProfiles use local resources only."
+        },
+        "fixed_test_profile_feasibility": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "design:self-policy-priority-shadow:preflight"
+          ],
+          "summary": "Execution used fixed absolute Python, cwd, argv, and an explicit cleared environment, or defines that same boundary for self-built work."
+        },
+        "crop_feasibility": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "design:self-policy-priority-shadow:preflight"
+          ],
+          "summary": "Disposable probes established the target causal slice; conditional items retain a named B2.1 fidelity condition."
+        },
+        "final_gate": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "design:self-policy-priority-shadow:preflight",
+            "design:self-policy-priority-shadow:preflight"
+          ],
+          "summary": "Gate follows the documented hard requirements and preserves conditional risks."
+        }
+      },
+      "final_gate": "GO",
+      "gate_reasons": [
+        "The four-module contract, ranking invariant, misleading symptom, independent oracle, and partial-fix matrix are fully specified."
+      ],
+      "conditional_resolution": [],
+      "recommended_action": "ENTER_B2_1_CONSTRUCTION",
+      "audited_at": "2026-07-16T00:00:00+08:00"
+    },
+    {
+      "candidate_id": "self-async-cancel-cleanup",
+      "preflight_schema_version": "1.0.0",
+      "source_kind": "SELF_BUILT",
+      "original_audit_status": "ELIGIBLE",
+      "source_project": "AgentForge original evaluation design",
+      "source_bug_id": "self-async-cancel-cleanup",
+      "license": "N/A - original design concept; code not yet authored",
+      "license_status": "VERIFIED",
+      "attribution_requirements": "No third-party code exists; B2.1 must author an original fixture and record AgentForge project ownership.",
+      "buggy_revision": null,
+      "fixed_revision": null,
+      "source_evidence": [
+        {
+          "kind": "ORIGINAL_DESIGN",
+          "reference": "design:self-async-cancel-cleanup:preflight"
+        },
+        {
+          "kind": "USER_VISIBLE_SYMPTOM",
+          "reference": "Cancelling a batch reports completion, but a later batch cannot acquire one of the resources it needs."
+        },
+        {
+          "kind": "CORE_INVARIANT",
+          "reference": "Cancellation waits for every owned child and releases every acquired lease exactly once before the coordinator reports completion."
+        },
+        {
+          "kind": "BUGGY_MECHANISM",
+          "reference": "The coordinator cancels children and immediately returns without awaiting their cleanup paths or releasing partially acquired leases."
+        },
+        {
+          "kind": "REPAIR_PRINCIPLE",
+          "reference": "Track ownership explicitly, cancel children, await bounded cleanup, and release leases in a shielded finalization path."
+        }
+      ],
+      "source_checkout_verified": false,
+      "bug_fix_relation_verified": false,
+      "original_failure_reproduced": false,
+      "reference_fix_verified": false,
+      "failure_command": null,
+      "passing_command": null,
+      "test_repetitions": 0,
+      "deterministic_result": true,
+      "minimum_test_runtime_ms": 0,
+      "maximum_test_runtime_ms": 0,
+      "dependency_inventory": [
+        "Python 3.14 standard library",
+        "pytest from immutable TestProfile"
+      ],
+      "dependency_install_required_for_source_audit": false,
+      "target_fixture_runtime_dependencies": [
+        "Python standard library",
+        "pre-provisioned pytest TestProfile"
+      ],
+      "network_required": false,
+      "external_service_required": false,
+      "database_required": false,
+      "native_build_required": false,
+      "python_3_14_status": "INFERRED",
+      "windows_status": "INFERRED",
+      "offline_status": "VERIFIED",
+      "fixed_test_profile_feasibility": true,
+      "crop_feasibility": "CONDITIONAL",
+      "crop_fidelity_risk": "MEDIUM",
+      "required_source_files": [
+        "batch_flow/coordinator.py",
+        "batch_flow/leases.py",
+        "batch_flow/workers.py",
+        "batch_flow/service.py"
+      ],
+      "required_test_files": [
+        "tests/test_visible_behavior.py",
+        "hidden/test_invariants.py"
+      ],
+      "required_support_files": [
+        "task_manifest.json",
+        "README.md"
+      ],
+      "expected_fixture_file_count": 8,
+      "expected_fixture_size_bytes": 62000,
+      "reference_patch_files": [],
+      "reference_patch_lines": 0,
+      "reference_patch_changes_tests": false,
+      "reference_patch_changes_dependencies": false,
+      "visible_test_plan": "Cancel during one worker wait and show that the top-level task ends while a subsequent batch remains blocked.",
+      "hidden_test_plan": "Use explicit barriers for cancellation during acquisition, partial fan-out, child failure, repeated cancel, timeout, and post-cancel reuse; assert no background tasks remain.",
+      "anti_hardcoding_plan": "Use deterministic synchronization barriers and task enumeration rather than sleeps or wall-clock races.",
+      "known_incorrect_patch_examples": [
+        "Catch and suppress CancelledError without awaiting children",
+        "Release only leases recorded before fan-out completes",
+        "Increase the timeout"
+      ],
+      "protected_paths_plan": [
+        "tests/",
+        "reference/",
+        "task_manifest.json",
+        "fixtures/schedule.json"
+      ],
+      "expected_edit_rounds": 2,
+      "difficulty_before": "CHALLENGE",
+      "difficulty_after_preflight": "CHALLENGE",
+      "difficulty_change_reason": "No change: module count, causal distance, feedback rounds, and hidden interleavings support the original label.",
+      "demo_suitability": "GOOD",
+      "primary_risks": [
+        "The task becomes flaky if B2.1 uses sleeps instead of explicit synchronization barriers."
+      ],
+      "unresolved_questions": [
+        "Can all cancellation windows run deterministically within the CHALLENGE TestProfile timeout?"
+      ],
+      "evidence_classification": {
+        "license_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "design:self-async-cancel-cleanup:preflight"
+          ],
+          "summary": "License text and attribution were checked at the pinned source revision."
+        },
+        "source_checkout_verified": {
+          "status": "UNVERIFIED",
+          "evidence_refs": [
+            "design:self-async-cancel-cleanup:preflight",
+            "design:self-async-cancel-cleanup:preflight"
+          ],
+          "summary": "Pinned public checkout was inspected, or the original self-built design boundary was reviewed."
+        },
+        "bug_fix_relation_verified": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "design:self-async-cancel-cleanup:preflight",
+            "design:self-async-cancel-cleanup:preflight"
+          ],
+          "summary": "The public fix relation was executed or the self-built causal repair was closed at design level."
+        },
+        "original_failure_reproduced": {
+          "status": "UNVERIFIED",
+          "evidence_refs": [
+            "design:self-async-cancel-cleanup:preflight"
+          ],
+          "summary": "Buggy state failed deterministically for public sources; self-built fixtures do not exist in B2.0."
+        },
+        "reference_fix_verified": {
+          "status": "UNVERIFIED",
+          "evidence_refs": [
+            "design:self-async-cancel-cleanup:preflight"
+          ],
+          "summary": "Fixed state passed deterministically for public sources; self-built repair remains a reviewed design."
+        },
+        "deterministic_result": {
+          "status": "UNVERIFIED",
+          "evidence_refs": [
+            "design:self-async-cancel-cleanup:preflight"
+          ],
+          "summary": "Public checks were repeated three times; self-built determinism relies on the specified barrier/test design."
+        },
+        "python_3_14_status": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "design:self-async-cancel-cleanup:preflight"
+          ],
+          "summary": "Public target logic was exercised on Python 3.14; self-built compatibility is a standard-library design constraint."
+        },
+        "windows_status": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "design:self-async-cancel-cleanup:preflight"
+          ],
+          "summary": "Public probes ran on Windows; self-built platform behavior remains design-level."
+        },
+        "offline_status": {
+          "status": "VERIFIED",
+          "evidence_refs": [
+            "design:self-async-cancel-cleanup:preflight"
+          ],
+          "summary": "All admitted checks and proposed TestProfiles use local resources only."
+        },
+        "fixed_test_profile_feasibility": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "design:self-async-cancel-cleanup:preflight"
+          ],
+          "summary": "Execution used fixed absolute Python, cwd, argv, and an explicit cleared environment, or defines that same boundary for self-built work."
+        },
+        "crop_feasibility": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "design:self-async-cancel-cleanup:preflight"
+          ],
+          "summary": "Disposable probes established the target causal slice; conditional items retain a named B2.1 fidelity condition."
+        },
+        "final_gate": {
+          "status": "INFERRED",
+          "evidence_refs": [
+            "design:self-async-cancel-cleanup:preflight",
+            "design:self-async-cancel-cleanup:preflight"
+          ],
+          "summary": "Gate follows the documented hard requirements and preserves conditional risks."
+        }
+      },
+      "final_gate": "CONDITIONAL",
+      "gate_reasons": [
+        "The design and incorrect-patch matrix are complete, but deterministic cancellation scheduling must be demonstrated before formal admission."
+      ],
+      "conditional_resolution": [
+        "B2.1 must implement barrier-driven scheduling and repeat every hidden interleaving without timing sleeps."
+      ],
+      "recommended_action": "RESOLVE_DURING_B2_1_BEFORE_ADMISSION",
+      "audited_at": "2026-07-16T00:00:00+08:00"
+    }
+  ]
+}

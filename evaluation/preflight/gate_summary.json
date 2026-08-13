@@ -1,0 +1,46 @@
+{
+  "preflight_schema_version": "1.0.0",
+  "counts": {
+    "GO": 6,
+    "CONDITIONAL": 4,
+    "NO_GO": 0,
+    "UNVERIFIED": 0
+  },
+  "candidate_gates": {
+    "quixbugs-shortest-path-length": "GO",
+    "quixbugs-topological-ordering": "CONDITIONAL",
+    "bugsinpy-black-21": "GO",
+    "bugsinpy-pysnooper-3": "CONDITIONAL",
+    "bugsinpy-httpie-4": "CONDITIONAL",
+    "swebench-flask-5014": "GO",
+    "swebench-pytest-10051": "GO",
+    "self-durable-double-consumption": "GO",
+    "self-policy-priority-shadow": "GO",
+    "self-async-cancel-cleanup": "CONDITIONAL"
+  },
+  "recommended_first_fixture_candidate_ids": [
+    "quixbugs-shortest-path-length",
+    "bugsinpy-black-21",
+    "swebench-pytest-10051",
+    "self-durable-double-consumption"
+  ],
+  "human_decision": {
+    "decision_status": "M7_B2_1_AUTHORIZED",
+    "approved_first_fixture_candidate_ids": [
+      "quixbugs-shortest-path-length",
+      "bugsinpy-black-21",
+      "swebench-pytest-10051",
+      "self-durable-double-consumption"
+    ],
+    "conditional_candidate_strategy": "BUILD_WITH_ADMISSION_GATES",
+    "current_replacement_decision": "NO_REPLACEMENTS",
+    "model_runs_authorized": false,
+    "decided_at": "2026-07-17T00:00:00+08:00"
+  },
+  "formal_fixture_construction_started": true,
+  "formal_fixture_asset_digest": "fc526d69affd04f6f67367e0863d3b2de5828dc4b36b41f7bb9353fb345f39d5",
+  "formal_fixture_verification_passed": true,
+  "model_evaluation_started": false,
+  "m7_b2_1_started": true,
+  "m7_b2_1_completed": true
+}

@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentforge-runtime"
+version = "0.1.0"
+description = "A durable, auditable, and policy-controlled runtime for long-running AI agents."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=2.45.0",
+    "pydantic>=2.10,<3",
+    "sqlalchemy>=2.0,<3",
+]
+
+[project.urls]
+Repository = "https://github.com/hiaanoi/agentforge"
+Documentation = "https://github.com/hiaanoi/agentforge#readme"
+Issues = "https://github.com/hiaanoi/agentforge/issues"
+
+[project.scripts]
+agentforge = "agentforge.cli.main:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.14",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "ruff>=0.9",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentforge"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+asyncio_mode = "auto"
+pythonpath = ["src"]
+testpaths = ["tests"]
+markers = [
+    "live: opt-in tests that call a configured remote model provider",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]

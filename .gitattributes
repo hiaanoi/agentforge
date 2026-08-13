@@ -1,0 +1,18 @@
+# Fixture digests are byte-for-byte portable across Git configurations.
+evaluation/fixtures/** text eol=lf
+
+# Historical evidence generators froze these JSON/CSV assets with CRLF bytes.
+evaluation/candidates/build_assets.py text eol=lf
+evaluation/candidates/*.json text eol=crlf
+evaluation/candidates/*.csv text eol=crlf
+evaluation/preflight/build_assets.py text eol=lf
+evaluation/preflight/*.json text eol=crlf
+evaluation/preflight/*.csv text eol=crlf
+evaluation/preflight/primary_preflight_matrix.csv text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.zip binary
+*.whl binary

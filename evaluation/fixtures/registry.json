@@ -1,0 +1,18 @@
+{
+  "fixture_registry_version": "1.0.0",
+  "model_evaluation_authorized": false,
+  "tasks": [
+    {
+      "task_id": "bugsinpy-black-21"
+    },
+    {
+      "task_id": "quixbugs-shortest-path-length"
+    },
+    {
+      "task_id": "self-durable-double-consumption"
+    },
+    {
+      "task_id": "swebench-pytest-10051"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "preflight_schema_version": "1.0.0",
+  "strategy": "SOURCE_TIERED_ON_HIGH_RISK_ONLY",
+  "results": [
+    {
+      "candidate_id": "bugsinpy-cookiecutter-2",
+      "trigger_candidate_id": "bugsinpy-httpie-4",
+      "preflight_depth": "QUICK_METADATA_REVIEW",
+      "final_gate": "UNVERIFIED",
+      "reason": "Registered same-source fallback only; no automatic replacement and no executable preflight was required before the HTTPie B2.1 mapping-fidelity condition is attempted."
+    }
+  ]
+}

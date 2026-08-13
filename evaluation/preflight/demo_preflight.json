@@ -1,0 +1,18 @@
+{
+  "preflight_schema_version": "1.0.0",
+  "primary_demo_candidate_id": "self-durable-double-consumption",
+  "primary_demo_gate": "GO",
+  "backup_demo_candidate_id": "self-terminal-state-cas",
+  "backup_design_status": "GO_AT_DESIGN_LEVEL",
+  "automatic_switch_performed": false,
+  "primary_demo_reasons": [
+    "External duplicate symptom is easy to explain without naming the invariant.",
+    "Four-module crash-window diagnosis demonstrates durable systems reasoning.",
+    "Visible then hidden restart/concurrency feedback supports a two-round interview narrative."
+  ],
+  "leakage_controls": [
+    "Use parcel-domain names and no AgentForge class, table, state, or event names.",
+    "Do not include double consumption, idempotent resume, or exactly once in the task description.",
+    "Author tests independently from AgentForge regressions."
+  ]
+}
