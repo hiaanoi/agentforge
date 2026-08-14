@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from agentforge.application.approval_commands import DecideApprovalCommand
 from agentforge.application.contracts import OutcomeStatus, ReceiptStatus
@@ -357,9 +357,13 @@ async def test_product_resume_lease_loss_returns_unknown_without_run_terminal(
     task = asyncio.create_task(runtime.resume(command))
     await asyncio.wait_for(provider.started.wait(), timeout=10)
     with database.session() as session:
-        lease = session.get(RunLeaseRow, str(run.run_id))
-        assert lease is not None
-        lease.released_at = lease.heartbeat_at
+        changed = session.execute(
+            update(RunLeaseRow)
+            .where(RunLeaseRow.run_id == str(run.run_id))
+            .where(RunLeaseRow.released_at.is_(None))
+            .values(released_at=RunLeaseRow.heartbeat_at)
+        ).rowcount
+        assert changed == 1
     result = await asyncio.wait_for(task, timeout=10)
 
     assert result.outcome is OutcomeStatus.UNKNOWN
