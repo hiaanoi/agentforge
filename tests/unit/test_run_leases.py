@@ -71,6 +71,20 @@ def test_acquire_renew_release_and_expired_takeover_are_monotonic(tmp_path: Path
     database.close()
 
 
+def test_release_accepts_current_epoch_after_heartbeat_version_advances(tmp_path: Path) -> None:
+    database, run_id, _, leases = kernel(tmp_path)
+    lease = leases.acquire(run_id, owner_id="worker", ttl=timedelta(seconds=30))
+
+    # A driver heartbeat can advance only the CAS version while a synchronous
+    # pause transaction is preparing to release the same ownership epoch.
+    leases.renew(lease.authority, ttl=timedelta(seconds=30))
+
+    leases.release(lease.authority)
+
+    assert leases.current(run_id) is None
+    database.close()
+
+
 def test_two_database_atomic_acquire_or_observe_has_exactly_one_owner(
     tmp_path: Path,
 ) -> None:
