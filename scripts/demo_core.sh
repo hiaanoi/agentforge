@@ -4,7 +4,8 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/agentforge-core.XXXXXX")
 VERIFIER=$(mktemp -d "${TMPDIR:-/tmp}/agentforge-verifier.XXXXXX")
-trap 'rm -rf "$WORK" "$VERIFIER"' EXIT
+CLI_ENV=$(mktemp -d "${TMPDIR:-/tmp}/agentforge-cli.XXXXXX")
+trap 'rm -rf "$WORK" "$VERIFIER" "$CLI_ENV"' EXIT
 cp -R "$ROOT/examples/demo-repair/." "$WORK/"
 mkdir -p "$WORK/.agentforge"
 cp "$WORK/tests/test_demo_calc.py" "$VERIFIER/test_demo_calc.py"
@@ -22,6 +23,11 @@ result = unittest.TextTestRunner().run(
 raise SystemExit(not result.wasSuccessful())
 EOF
 PYTHON=$(command -v python)
+WHEEL=$(find "$ROOT/dist" -maxdepth 1 -type f -name 'agentforge_runtime-*.whl' -print -quit)
+[ -n "$WHEEL" ] || { printf '%s\n' 'Build the AgentForge wheel with `uv build` before running this demo.' >&2; exit 1; }
+uv venv "$CLI_ENV" >/dev/null 2>&1 || { printf '%s\n' 'Failed to create the fresh AgentForge CLI environment.' >&2; exit 1; }
+uv pip install --python "$CLI_ENV/bin/python" "$WHEEL" >/dev/null 2>&1 || { printf '%s\n' 'Failed to install the fresh AgentForge wheel.' >&2; exit 1; }
+AGENTFORGE="$CLI_ENV/bin/agentforge"
 HASH=$(sha256sum "$WORK/src/demo_calc.py" | awk '{print $1}')
 
 cat >"$WORK/.agentforge/config.toml" <<'EOF'
@@ -83,20 +89,20 @@ purpose = "verification"
 verifier_root = "$VERIFIER"
 EOF
 
-agentforge trust --workspace "$WORK" visible --yes
-agentforge trust --workspace "$WORK" verify --yes
-OUT=$(agentforge exec --workspace "$WORK" "Fix demo addition" || true)
+"$AGENTFORGE" trust --workspace "$WORK" visible --yes
+"$AGENTFORGE" trust --workspace "$WORK" verify --yes
+OUT=$("$AGENTFORGE" exec --workspace "$WORK" "Fix demo addition" || true)
 printf '%s\n' "$OUT"
 RUN=$(printf '%s\n' "$OUT" | sed -n 's/.*run_id=\([^ ]*\).*/\1/p' | head -n 1)
 [ -n "$RUN" ]
-APPROVAL=$(agentforge approvals --workspace "$WORK" --run-id "$RUN" | sed -n 's/.*approval_id=\([^ ]*\).*/\1/p' | tail -n 1)
+APPROVAL=$("$AGENTFORGE" approvals --workspace "$WORK" --run-id "$RUN" | sed -n 's/.*approval_id=\([^ ]*\).*/\1/p' | tail -n 1)
 [ -n "$APPROVAL" ]
 
 while [ -n "$APPROVAL" ]; do
-  agentforge approve --workspace "$WORK" "$APPROVAL" >/dev/null || true
-  OUT=$(agentforge resume --workspace "$WORK" "$RUN" || true)
+  "$AGENTFORGE" approve --workspace "$WORK" "$APPROVAL" >/dev/null || true
+  OUT=$("$AGENTFORGE" resume --workspace "$WORK" "$RUN" || true)
   printf '%s\n' "$OUT"
-  APPROVAL=$(agentforge approvals --workspace "$WORK" --run-id "$RUN" | sed -n 's/.*approval_id=\([^ ]*\).*/\1/p' | tail -n 1)
+  APPROVAL=$("$AGENTFORGE" approvals --workspace "$WORK" --run-id "$RUN" | sed -n 's/.*approval_id=\([^ ]*\).*/\1/p' | tail -n 1)
 done
 
 grep -q 'return a + b$' "$WORK/src/demo_calc.py"
