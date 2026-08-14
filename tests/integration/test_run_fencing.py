@@ -416,7 +416,7 @@ def test_resume_replay_rejects_same_owner_with_replaced_lease(tmp_path: Path) ->
     database, run, _ = paused_kernel(tmp_path / "resume-replaced.sqlite3")
     command = ResumeRun(command_id=uuid4(), run_id=run.run_id)
     workflow = ResumeRunWorkflow(database)
-    first = workflow.prepare(command, owner_id="stable-owner", ttl=timedelta(milliseconds=1))
+    first = workflow.prepare(command, owner_id="stable-owner", ttl=timedelta(seconds=5))
     with database.session() as session:
         row = session.get(RunRow, str(run.run_id))
         assert row is not None
@@ -426,9 +426,11 @@ def test_resume_replay_rejects_same_owner_with_replaced_lease(tmp_path: Path) ->
 
         lease_row = session.get(RunLeaseRow, str(run.run_id))
         assert lease_row is not None
+        # Expire the first lease explicitly. Its initial TTL is deliberately
+        # generous so the preceding workflow preparation is not scheduler-sensitive.
         lease_row.acquired_at = lease_row.acquired_at - timedelta(seconds=3)
         lease_row.heartbeat_at = lease_row.heartbeat_at - timedelta(seconds=2)
-        lease_row.expires_at = lease_row.expires_at - timedelta(seconds=1)
+        lease_row.expires_at = lease_row.heartbeat_at + timedelta(milliseconds=1)
     replacement = RunLeaseStore(database).acquire(
         run.run_id, owner_id="stable-owner", ttl=timedelta(seconds=30)
     )

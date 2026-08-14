@@ -2,6 +2,8 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $work = Join-Path ([IO.Path]::GetTempPath()) ("agentforge-core-" + [guid]::NewGuid())
 $verifier = Join-Path ([IO.Path]::GetTempPath()) ("agentforge-verifier-" + [guid]::NewGuid())
+$cliEnvironment = Join-Path ([IO.Path]::GetTempPath()) ("agentforge-cli-" + [guid]::NewGuid())
+$uvLog = Join-Path ([IO.Path]::GetTempPath()) ("agentforge-uv-" + [guid]::NewGuid() + '.log')
 Copy-Item (Join-Path $root 'examples/demo-repair') $work -Recurse
 New-Item -ItemType Directory -Force -Path (Join-Path $work '.agentforge'), $verifier | Out-Null
 Copy-Item (Join-Path $work 'tests/test_demo_calc.py') (Join-Path $verifier 'test_demo_calc.py')
@@ -19,6 +21,38 @@ result = unittest.TextTestRunner().run(
 raise SystemExit(not result.wasSuccessful())
 '@ | Set-Content (Join-Path $verifier '__main__.py') -NoNewline
 $python = (Get-Command python -ErrorAction Stop).Source.Replace('\', '/')
+$uv = (Get-Command uv -ErrorAction Stop).Source
+$wheel = Get-ChildItem -LiteralPath (Join-Path $root 'dist') -Filter 'agentforge_runtime-*.whl' |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+if ($null -eq $wheel) { throw 'Build the AgentForge wheel with `uv build` before running this demo.' }
+
+function Invoke-UvSilently {
+    param(
+        [string[]]$UvArguments,
+        [string]$FailureMessage
+    )
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $uv @UvArguments *> $uvLog
+        $uvExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($uvExitCode -ne 0) {
+        Get-Content -LiteralPath $uvLog | Write-Error
+        throw $FailureMessage
+    }
+}
+
+Invoke-UvSilently -UvArguments @('venv', $cliEnvironment) -FailureMessage 'Failed to create the fresh AgentForge CLI environment.'
+$cliPython = Join-Path $cliEnvironment 'Scripts/python.exe'
+Invoke-UvSilently -UvArguments @('pip', 'install', '--python', $cliPython, $wheel.FullName) -FailureMessage 'Failed to install the fresh AgentForge wheel.'
+Remove-Item -LiteralPath $uvLog -Force -ErrorAction SilentlyContinue
+$agentforge = Join-Path $cliEnvironment 'Scripts/agentforge.exe'
 $hash = (Get-FileHash (Join-Path $work 'src/demo_calc.py') -Algorithm SHA256).Hash.ToLower()
 
 @'
@@ -82,20 +116,20 @@ verifier_root = "$($verifier.Replace('\', '/'))"
 "@ | Set-Content (Join-Path $work '.agentforge/runtime.toml') -NoNewline
 
 try {
-    agentforge trust --workspace $work visible --yes
-    agentforge trust --workspace $work verify --yes
-    $out = @(agentforge exec --workspace $work 'Fix demo addition' 2>&1)
+    & $agentforge trust --workspace $work visible --yes
+    & $agentforge trust --workspace $work verify --yes
+    $out = @(& $agentforge exec --workspace $work 'Fix demo addition' 2>&1)
     $out | Write-Output
     $run = ($out | Select-String -Pattern 'run_id=([^ ]+)' | Select-Object -First 1).Matches.Groups[1].Value
-    $pending = @(agentforge approvals --workspace $work --run-id $run 2>&1)
+    $pending = @(& $agentforge approvals --workspace $work --run-id $run 2>&1)
     $match = $pending | Select-String -Pattern 'approval_id=([^ ]+)' | Select-Object -Last 1
     $approval = if ($null -eq $match) { '' } else { $match.Matches.Groups[1].Value }
     if (!$run -or !$approval) { throw 'Demo did not produce durable identifiers.' }
     while ($approval) {
-        agentforge approve --workspace $work $approval | Out-Null
-        $out = @(agentforge resume --workspace $work $run 2>&1)
+        & $agentforge approve --workspace $work $approval | Out-Null
+        $out = @(& $agentforge resume --workspace $work $run 2>&1)
         $out | Write-Output
-        $pending = @(agentforge approvals --workspace $work --run-id $run 2>&1)
+        $pending = @(& $agentforge approvals --workspace $work --run-id $run 2>&1)
         $match = $pending | Select-String -Pattern 'approval_id=([^ ]+)' | Select-Object -Last 1
         $approval = if ($null -eq $match) { '' } else { $match.Matches.Groups[1].Value }
     }
@@ -106,4 +140,6 @@ try {
 finally {
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $verifier -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $cliEnvironment -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $uvLog -Force -ErrorAction SilentlyContinue
 }

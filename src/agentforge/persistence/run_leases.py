@@ -338,7 +338,7 @@ class RunLeaseStore:
             changed = self._rowcount(
                 session.execute(
                     update(RunLeaseRow)
-                    .where(*self.active_conditions(authority, now=now))
+                    .where(*self.write_conditions(authority, now=now))
                     .values(
                         released_at=now,
                         version=RunLeaseRow.version + 1,
