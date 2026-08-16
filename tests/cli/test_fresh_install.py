@@ -45,6 +45,14 @@ def test_core_demo_scripts_install_the_fresh_wheel_before_running_the_cli() -> N
     assert ">/dev/null 2>&1" in shell
 
 
+def test_posix_core_demo_uses_a_link_free_project_python() -> None:
+    shell = Path("scripts/demo_core.sh").read_text(encoding="utf-8")
+
+    assert "uv python find" in shell
+    assert "os.path.realpath(sys.executable)" in shell
+    assert "command -v python" not in shell
+
+
 def test_ci_builds_and_smoke_tests_the_wheel_on_supported_platforms() -> None:
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     for platform in ("windows-latest", "ubuntu-latest"):

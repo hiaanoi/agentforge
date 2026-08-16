@@ -22,7 +22,14 @@ result = unittest.TextTestRunner().run(
 )
 raise SystemExit(not result.wasSuccessful())
 EOF
-PYTHON=$(command -v python)
+PYTHON=$(uv python find --project "$ROOT") || {
+  printf '%s\n' 'Failed to find a Python interpreter for the AgentForge project.' >&2
+  exit 1
+}
+PYTHON=$("$PYTHON" -c 'import os, sys; print(os.path.realpath(sys.executable))') || {
+  printf '%s\n' 'Failed to resolve the AgentForge project interpreter.' >&2
+  exit 1
+}
 WHEEL=$(find "$ROOT/dist" -maxdepth 1 -type f -name 'agentforge_runtime-*.whl' -print -quit)
 [ -n "$WHEEL" ] || { printf '%s\n' 'Build the AgentForge wheel with `uv build` before running this demo.' >&2; exit 1; }
 uv venv "$CLI_ENV" >/dev/null 2>&1 || { printf '%s\n' 'Failed to create the fresh AgentForge CLI environment.' >&2; exit 1; }
