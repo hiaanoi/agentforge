@@ -87,6 +87,8 @@ CID=$(docker create "$IMAGE" true)
 docker cp "$CID:/testbed/." "$WORKSPACE"
 docker rm "$CID"
 sudo chown -R "$(id -u):$(id -g)" "$WORKSPACE"
+git -C "$WORKSPACE" diff --quiet cffd4e0f86fefd4802349a9f9b19ed70934ea354 HEAD
+git -C "$WORKSPACE" checkout --detach cffd4e0f86fefd4802349a9f9b19ed70934ea354
 test "$(git -C "$WORKSPACE" rev-parse HEAD)" = cffd4e0f86fefd4802349a9f9b19ed70934ea354
 printf '.agentforge/\n' >> "$WORKSPACE/.git/info/exclude"
 ```
