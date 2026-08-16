@@ -67,8 +67,9 @@ GitHub 录制版展示同一条公开 Core CLI 路径：trust、跨进程 approv
 - provider attempt journal 记录请求边界、重试、使用量与不确定结果，避免把未知外部调用误判为
   可安全重试；
 - context compaction、loop detection、结构化工具结果和多工具策略，限制模型循环与上下文膨胀；
-- `ModelProvider` 既支持离线 Mock，也支持受显式授权的 OpenAI Responses adapter；真实运行默认
-  `store=False`，并对输出、重试和用量进行边界控制。
+- `ModelProvider` 支持离线 Mock、受显式授权的 OpenAI Responses adapter，以及使用独立
+  `DEEPSEEK_API_KEY` 的 DeepSeek Chat Completions adapter；远程 provider 均对输出、重试和用量
+  进行边界控制。
 
 深入设计：[架构说明](docs/architecture.md)、[Milestone 3 耐久审批与恢复报告](docs/milestone_03_report.md)、
 [Milestone 4 模型与上下文报告](docs/milestone_04_report.md)。
@@ -197,7 +198,12 @@ real-model Study 的具体范围，请从[评测指南](docs/evaluation_guide.md
   隐藏测试或原始 provider 数据；
 - 当前产品入口是 CLI；多轮交互会话/REPL（B）和面向公开发布的完整证据包（C）仍是后续范围。
 - 当前不提供 `arbitrary shell`、通用 `automatic bug repair`、`MCP server` 或 `web API`；
-  `additional model providers` 也属于后续范围。
+  其他未明确实现和验证的 model provider 也属于后续范围。
+
+AgentForge 已支持 DeepSeek provider，并可把 base-commit-bound 补丁导出为官方 SWE-bench
+prediction 格式。任何按当前路径产生的结果都只能表述为单实例 canary；它不是排行榜分数，也不
+构成通用代码修复能力声明。完整云端步骤见
+[DeepSeek + SWE-bench Canary 手册](docs/deepseek-swebench-canary.md)。
 
 ## 快速开始与开发验证
 
@@ -228,6 +234,7 @@ uv run --frozen pytest -m live -ra
 | 安装后运行公开 demo | [Core CLI 演示手册](docs/core-demo.md) |
 | 核对 Runtime、审批、mutation、验证数据流 | [架构说明（英文）](docs/architecture.md) |
 | 核对评测方法、失败分类和真实模型边界 | [评测指南](docs/evaluation_guide.md) |
+| 运行 DeepSeek + SWE-bench 单实例 Canary | [云端 Canary 手册](docs/deepseek-swebench-canary.md) |
 | 查阅 milestone 事实、旧报告与实施顺序 | [历史实现计划](docs/implementation_plan.md) |
 | 查阅安全假设、威胁模型和不支持项 | [安全模型](docs/security_model.md) |
 | 查阅 real-model Study 基础设施的当前范围 | [7-B2.4 报告](docs/milestone_07b2_4_report.md) |

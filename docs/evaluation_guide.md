@@ -82,6 +82,14 @@ actions. This feedback is persisted in the checkpoint and returned to the model 
 It is generated only from development-test output; final hidden verification continues to remove
 stdout/stderr and does not create hidden-test feedback.
 
+### DeepSeek SWE-bench Canary Boundary
+
+AgentForge supports DeepSeek as a first-class provider and can export a base-commit-bound patch in
+the standard SWE-bench prediction format. Any official-harness result produced by the documented
+path is deliberately limited to a one-instance canary. It is not a leaderboard score, an estimate
+over SWE-bench Lite, or evidence of general autonomous repair quality. Reproduction steps are in
+[`deepseek-swebench-canary.md`](deepseek-swebench-canary.md).
+
 ## Task-Level Diagnosis Protocol
 
 When a task fails:

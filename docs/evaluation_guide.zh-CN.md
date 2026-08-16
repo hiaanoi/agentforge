@@ -84,6 +84,13 @@ Runtime 现在会把 development test 失败渲染为有界的 `repair_feedback`
 下一步返回给模型。它只来自 development test 输出；final hidden verification 仍会清空 stdout/stderr，
 不会生成 hidden-test 反馈。
 
+### DeepSeek SWE-bench Canary 边界
+
+AgentForge 已把 DeepSeek 作为正式 provider 接入，并能导出绑定 base commit 的标准 SWE-bench
+prediction。任何按当前文档路径产生的官方 harness 结果都被严格限定为一个实例的 canary：它不是
+排行榜成绩，不是对 SWE-bench Lite 总体表现的估计，也不能证明通用自主修复能力。复现步骤见
+[`deepseek-swebench-canary.md`](deepseek-swebench-canary.md)。
+
 ## 不做的声明
 
 AgentForge 当前不声称拥有官方 SWE-bench 成绩、通用自动修复能力、生产部署就绪状态、OS 级 sandbox，
