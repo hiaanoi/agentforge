@@ -1,9 +1,11 @@
+import hashlib
+import json
 from typing import Protocol
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, JsonValue
 
-from agentforge.domain.enums import MutationExecutionStatus
+from agentforge.domain.enums import MutationExecutionStatus, ToolErrorCode
 from agentforge.domain.mutations import MutationExecutionRecord
 from agentforge.domain.repair import (
     BudgetConsumptionDecision,
@@ -219,6 +221,42 @@ class RepairCoordinator:
         if state.terminal:
             return state
         raise RuntimeError("Repair state changed during tool failure handling")
+
+    def record_model_tool_failure(
+        self,
+        run_id: object,
+        *,
+        step_number: int,
+        tool_name: str,
+        error_type: ToolErrorCode,
+        authority: RunLeaseAuthority,
+    ) -> RepairState:
+        """Count a recoverable model-authored tool mistake without persisting details."""
+
+        from uuid import UUID
+
+        if not isinstance(run_id, UUID):
+            raise TypeError("run_id must be a UUID")
+        if step_number <= 0:
+            raise ValueError("step_number must be positive")
+        payload = json.dumps(
+            {
+                "error_type": error_type.value,
+                "run_id": str(run_id),
+                "step_number": step_number,
+                "tool_name": tool_name,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        fact_id = f"model-tool:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
+        return self._workflow.record_policy_violation(
+            run_id,
+            fact_id=fact_id,
+            rule=f"model_tool_{error_type.value.casefold()}",
+            severe=False,
+            authority=authority,
+        )
 
     def runtime_context(self, run_id: object) -> dict[str, JsonValue]:
         from uuid import UUID

@@ -105,6 +105,19 @@ from agentforge.runtime.test_execution import (
 )
 from agentforge.tools.executor import ToolExecutor
 
+_RECOVERABLE_MODEL_TOOL_ERRORS = frozenset(
+    {
+        ToolErrorCode.TOOL_NOT_FOUND,
+        ToolErrorCode.INVALID_ARGUMENTS,
+        ToolErrorCode.INVALID_PATH,
+        ToolErrorCode.PATH_NOT_FOUND,
+        ToolErrorCode.PATH_TYPE_MISMATCH,
+        ToolErrorCode.BINARY_FILE,
+        ToolErrorCode.ENCODING_ERROR,
+        ToolErrorCode.FILE_TOO_LARGE,
+    }
+)
+
 
 class AgentRuntime:
     def __init__(
@@ -1240,11 +1253,26 @@ class AgentRuntime:
                         test_execution_state,
                     )
                 if not outcome.success:
-                    return self._fail_tool(
-                        ownership,
-                        run,
-                        outcome.error_message or "Tool execution failed",
+                    if (
+                        self._repairs is None
+                        or outcome.error_type not in _RECOVERABLE_MODEL_TOOL_ERRORS
+                    ):
+                        return self._fail_tool(
+                            ownership,
+                            run,
+                            outcome.error_message or "Tool execution failed",
+                        )
+                    repair_state = self._repairs.record_model_tool_failure(
+                        run.run_id,
+                        step_number=run.current_step,
+                        tool_name=output.tool,
+                        error_type=outcome.error_type,
+                        authority=self._authority(ownership, run.run_id),
                     )
+                    if repair_state.terminal:
+                        return self._finish_repair_run(
+                            ownership, run, repair_state.status
+                        )
                 rendered = self._result_renderer.render(output.tool, outcome)
                 rendered_result = (
                     outcome.model_copy(

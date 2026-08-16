@@ -176,7 +176,7 @@ async def test_model_timeout_terminalizes_repair_state_with_safe_failure_facts(
 
 
 @pytest.mark.asyncio
-async def test_deterministic_tool_failure_terminalizes_as_model_quality_failure(
+async def test_recoverable_model_tool_failures_use_a_bounded_correction_budget(
     tmp_path: Path,
 ) -> None:
     workspace = tmp_path / "workspace"
@@ -187,19 +187,30 @@ async def test_deterministic_tool_failure_terminalizes_as_model_quality_failure(
     events = EventRepository(database)
     workflow = RepairWorkflow(database)
     resolver = WorkspacePathResolver(workspace)
+    provider = MockModelProvider(
+        [
+            {
+                "type": "tool_call",
+                "tool": "read_file",
+                "arguments": {"path": "missing.py", "unexpected": 1},
+            },
+            {
+                "type": "tool_call",
+                "tool": "read_file",
+                "arguments": {"path": "missing.py", "unexpected": 2},
+            },
+            {
+                "type": "tool_call",
+                "tool": "read_file",
+                "arguments": {"path": "missing.py", "unexpected": 3},
+            },
+        ]
+    )
     runtime = AgentRuntime(
         runs,
         events,
         CheckpointRepository(database),
-        MockModelProvider(
-            [
-                {
-                    "type": "tool_call",
-                    "tool": "read_file",
-                    "arguments": {"path": "missing.py"},
-                }
-            ]
-        ),
+        provider,
         ToolExecutor(
             ToolRegistry([ReadFileTool(resolver, SensitiveFilePolicy())]),
             PolicyEngine(resolver, SensitiveFilePolicy()),
@@ -208,7 +219,58 @@ async def test_deterministic_tool_failure_terminalizes_as_model_quality_failure(
         ),
         repair_coordinator=RepairCoordinator(workflow),
     )
-    run = runtime.create_run("read a missing fixture file")
+    run = runtime.create_run("correct malformed read requests")
+    workflow._evaluator_only_start(run.run_id, repair_policy(), uuid4(), "a" * 64)
+
+    failed = await runtime.execute(run.run_id)
+
+    state = workflow.get_state(run.run_id)
+    assert failed.status is RunStatus.FAILED
+    assert state.status is RepairCompletionStatus.POLICY_BLOCKED
+    assert state.failure_reason is RepairTerminationReason.POLICY_VIOLATION_LIMIT
+    assert state.policy_violations == 2
+    assert len(provider.requests) == 3
+    second_request = provider.requests[1].model_dump_json()
+    assert "INVALID_ARGUMENTS" in second_request
+    assert "Tool arguments failed schema validation" in second_request
+    database.close()
+
+
+@pytest.mark.asyncio
+async def test_sensitive_tool_failure_remains_fail_closed(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".env").write_text("SECRET=must-not-be-read\n", encoding="utf-8")
+    database = Database.from_path(tmp_path / "runtime.db")
+    database.create_schema()
+    runs = RunRepository(database)
+    events = EventRepository(database)
+    workflow = RepairWorkflow(database)
+    resolver = WorkspacePathResolver(workspace)
+    provider = MockModelProvider(
+        [
+            {
+                "type": "tool_call",
+                "tool": "read_file",
+                "arguments": {"path": ".env"},
+            },
+            {"type": "final_answer", "answer": "should not be reached"},
+        ]
+    )
+    runtime = AgentRuntime(
+        runs,
+        events,
+        CheckpointRepository(database),
+        provider,
+        ToolExecutor(
+            ToolRegistry([ReadFileTool(resolver, SensitiveFilePolicy())]),
+            PolicyEngine(resolver, SensitiveFilePolicy()),
+            events,
+            runs,
+        ),
+        repair_coordinator=RepairCoordinator(workflow),
+    )
+    run = runtime.create_run("read a sensitive fixture file")
     workflow._evaluator_only_start(run.run_id, repair_policy(), uuid4(), "a" * 64)
 
     failed = await runtime.execute(run.run_id)
@@ -217,4 +279,6 @@ async def test_deterministic_tool_failure_terminalizes_as_model_quality_failure(
     assert failed.status is RunStatus.FAILED
     assert state.status is RepairCompletionStatus.MODEL_TOOL_FAILED
     assert state.failure_reason is RepairTerminationReason.MODEL_TOOL_FAILED
+    assert state.policy_violations == 0
+    assert len(provider.requests) == 1
     database.close()
