@@ -261,6 +261,7 @@ def test_assets_contain_no_absolute_paths_or_secret_material() -> None:
     forbidden_secret_patterns = (
         re.compile(r"sk-[A-Za-z0-9_-]{16,}"),
         re.compile(r"OPENAI_API_KEY\s*="),
+        re.compile(r"DEEPSEEK_API_KEY\s*="),
         re.compile(r"(?:TOKEN|SECRET|PASSWORD)\s*=", re.IGNORECASE),
     )
     windows_absolute_path = re.compile(r"(?<![A-Za-z])[A-Za-z]:[\\/]")

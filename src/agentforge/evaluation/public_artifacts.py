@@ -15,6 +15,7 @@ class ForbiddenPublicArtifactError(RuntimeError):
 _FORBIDDEN_JSON_KEYS = frozenset(
     {
         "api_key",
+        "deepseek_api_key",
         "openai_api_key",
         "password",
         "provider_request_id",
@@ -37,6 +38,11 @@ _WINDOWS_ABSOLUTE_PATH = re.compile(
     r"(?:\\\\|//)[^\\/\s]+[\\/][^\\/\s]+[\\/])"
 )
 _POSIX_ABSOLUTE_PATH = re.compile(r"(?:^|[\"'\s=])/(?!/)")
+_NAMED_SECRET_ASSIGNMENT = re.compile(
+    r"\b(?:DEEPSEEK_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY|API_KEY|"
+    r"ACCESS_TOKEN|SECRET_KEY)\s*[:=]\s*[\"']?[A-Za-z0-9_./+=-]{8,}",
+    re.IGNORECASE,
+)
 _MAX_ARTIFACT_BYTES = 1_000_000
 _MAX_NODES = 10_000
 _MAX_STRING_BYTES = 64_000
@@ -118,6 +124,8 @@ class PublicArtifactScanner:
         if folded in _FORBIDDEN_JSON_KEYS:
             self._reject()
         if any(marker.casefold() in folded for marker in _FORBIDDEN_MARKERS):
+            self._reject()
+        if _NAMED_SECRET_ASSIGNMENT.search(text):
             self._reject()
         if _WINDOWS_ABSOLUTE_PATH.search(text) or _POSIX_ABSOLUTE_PATH.search(text):
             self._reject()

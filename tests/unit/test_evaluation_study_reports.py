@@ -437,6 +437,8 @@ def test_public_renderers_reject_summary_that_disagrees_with_tasks() -> None:
         '{"path":"/etc/private-config"}',
         '{"marker":"tests/hidden/test_oracle.py"}',
         '{"marker":"reference/fixed_files/answer.py"}',
+        'DEEPSEEK_API_KEY="definitely-not-a-placeholder"',
+        '{"deepseek_api_key":"definitely-not-a-placeholder"}',
     ],
 )
 def test_public_scanner_rejects_forbidden_content(artifact: str) -> None:
@@ -454,3 +456,9 @@ def test_public_scanner_rejects_supplied_secret_and_prompt() -> None:
         scanner.validate("cost: runtime-secret-value")
     with pytest.raises(ForbiddenPublicArtifactError):
         scanner.validate("text: exact private prompt body")
+
+
+def test_public_scanner_allows_deepseek_environment_name_without_value() -> None:
+    PublicArtifactScanner().validate(
+        "Configure DEEPSEEK_API_KEY with hidden terminal input."
+    )

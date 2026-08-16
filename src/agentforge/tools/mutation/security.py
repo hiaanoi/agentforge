@@ -12,7 +12,8 @@ _PROVIDER_TOKEN = re.compile(
     r"(?:sk-[A-Za-z0-9_-]{20,}|gh[opusr]_[A-Za-z0-9]{20,}|AKIA[A-Z0-9]{16})"
 )
 _NAMED_SECRET = re.compile(
-    r"\b(?:OPENAI_API_KEY|ANTHROPIC_API_KEY|API_KEY|ACCESS_TOKEN|SECRET_KEY)"
+    r"\b(?:DEEPSEEK_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY|API_KEY|"
+    r"ACCESS_TOKEN|SECRET_KEY)"
     r"\s*[:=]\s*[\"']?[A-Za-z0-9_./+=-]{8,}",
     re.IGNORECASE,
 )

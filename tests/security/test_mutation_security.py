@@ -103,6 +103,8 @@ def test_mutation_target_rejects_detected_reparse_points(
         "-----BEGIN PRIVATE KEY-----\nnot-a-real-key",
         "token = 'sk-" + "x" * 24 + "'",
         "OPENAI_API_KEY=definitely-not-a-placeholder",
+        "DEEPSEEK_API_KEY=definitely-not-a-placeholder",
+        'deepseek_api_key = "definitely-not-a-placeholder"',
     ],
 )
 def test_mutation_content_rejects_binary_controls_and_secret_markers(
@@ -121,3 +123,13 @@ def test_mutation_content_enforces_utf8_byte_limit(tmp_path: Path) -> None:
     with pytest.raises(ToolExecutionError) as error:
         policy.encode_text("你好", max_bytes=4)
     assert error.value.code is ToolErrorCode.FILE_TOO_LARGE
+
+
+def test_mutation_content_allows_documented_deepseek_environment_name(
+    tmp_path: Path,
+) -> None:
+    policy = make_policy(tmp_path)
+
+    content = "Set the DEEPSEEK_API_KEY environment variable securely."
+
+    assert policy.encode_text(content, max_bytes=128) == content.encode("utf-8")
