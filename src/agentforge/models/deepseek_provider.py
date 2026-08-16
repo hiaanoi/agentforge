@@ -136,9 +136,13 @@ class DeepSeekModelProvider:
             ) from exc
 
         duration_ms = max(0, int((perf_counter() - started) * 1000))
-        action, function_call_count, multi_tool_response, finish_reason = (
-            self._parse_action(response, request)
-        )
+        (
+            action,
+            function_call_count,
+            multi_tool_response,
+            finish_reason,
+            discarded_text_with_tool_calls,
+        ) = self._parse_action(response, request)
         return ModelResponse(
             action=action,
             usage=self._parse_usage(getattr(response, "usage", None)),
@@ -160,7 +164,11 @@ class DeepSeekModelProvider:
                     if multi_tool_response is not None
                     else None
                 ),
-                "provider_contract_deviation": multi_tool_response is not None,
+                "discarded_text_with_tool_calls": discarded_text_with_tool_calls,
+                "provider_contract_deviation": (
+                    multi_tool_response is not None
+                    or discarded_text_with_tool_calls
+                ),
             },
             multi_tool_response=multi_tool_response,
         )
@@ -169,7 +177,13 @@ class DeepSeekModelProvider:
         self,
         response: object,
         request: ModelRequest,
-    ) -> tuple[ToolCall | FinalAnswer, int, MultiToolResponseInfo | None, str | None]:
+    ) -> tuple[
+        ToolCall | FinalAnswer,
+        int,
+        MultiToolResponseInfo | None,
+        str | None,
+        bool,
+    ]:
         choices = getattr(response, "choices", None)
         if not isinstance(choices, list) or not choices:
             raise ModelProtocolError("Provider returned no choices")
@@ -186,8 +200,7 @@ class DeepSeekModelProvider:
             raise ModelProtocolError("Provider tool calls must be a list")
         content = getattr(message, "content", None)
         final_text = content.strip() if isinstance(content, str) else ""
-        if calls and final_text:
-            raise ModelProtocolError("Provider returned both a function call and final text")
+        discarded_text_with_tool_calls = bool(calls and final_text)
         multi_tool_response: MultiToolResponseInfo | None = None
         if len(calls) > 1:
             multi_tool_response = self._classify_multi_tool_response(
@@ -228,9 +241,16 @@ class DeepSeekModelProvider:
                 len(calls),
                 multi_tool_response,
                 finish_reason,
+                discarded_text_with_tool_calls,
             )
         if final_text:
-            return FinalAnswer(type="final", answer=final_text), 0, None, finish_reason
+            return (
+                FinalAnswer(type="final", answer=final_text),
+                0,
+                None,
+                finish_reason,
+                False,
+            )
         raise ModelProtocolError("Provider returned neither a function call nor final text")
 
     def _classify_multi_tool_response(

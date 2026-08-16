@@ -275,10 +275,9 @@ async def test_provider_rejects_unsafe_multi_tool_responses(
     [
         SimpleNamespace(id="none", model="deepseek-account-model", choices=[], usage=None),
         response(content="  "),
-        response(content="final", calls=[function_call()]),
     ],
 )
-async def test_provider_rejects_missing_empty_or_ambiguous_choices(
+async def test_provider_rejects_missing_or_empty_choices(
     provider_response: object,
 ) -> None:
     provider = DeepSeekModelProvider(
@@ -288,6 +287,28 @@ async def test_provider_rejects_missing_empty_or_ambiguous_choices(
 
     with pytest.raises(ModelProtocolError):
         await provider.generate(model_request())
+
+
+@pytest.mark.asyncio
+async def test_provider_prefers_tool_call_and_audits_discarded_text() -> None:
+    provider = DeepSeekModelProvider(
+        ModelProviderConfig(api_key="secret", model="deepseek-account-model"),
+        client=FakeClient(
+            response(
+                content="Sensitive explanatory text must not be persisted.",
+                calls=[function_call()],
+            )
+        ),
+    )
+
+    result = await provider.generate(model_request())
+
+    assert isinstance(result.action, ToolCall)
+    assert result.action.call_id == "call_2"
+    assert result.sanitized_metadata["discarded_text_with_tool_calls"] is True
+    assert result.sanitized_metadata["provider_contract_deviation"] is True
+    serialized = json.dumps(result.model_dump(mode="json"))
+    assert "Sensitive explanatory text" not in serialized
 
 
 @pytest.mark.asyncio
