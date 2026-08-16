@@ -71,7 +71,7 @@ DEEPSEEK_LIVE_TEST=1 uv run --frozen pytest tests/live/test_deepseek_live.py -q
 此前的 gold smoke 已留下一个包含 `/testbed` 的官方实例镜像。先找到它：
 
 ```bash
-IMAGE=$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep 'sympy__sympy-20590' | head -n 1)
+IMAGE=$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep 'sympy-20590' | head -n 1)
 test -n "$IMAGE"
 printf 'image=%s\n' "$IMAGE" | tee "$CANARY_ROOT/instance-image.txt"
 ```
