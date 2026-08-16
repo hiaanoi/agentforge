@@ -54,7 +54,7 @@ class ReplacementMode(StrEnum):
 class ProviderBinding(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    provider: Literal["mock", "openai"]
+    provider: Literal["mock", "openai", "deepseek"]
     model_id: str = Field(min_length=1, max_length=200)
     response_model_id: str = Field(default="", max_length=200)
     timeout_seconds: float = Field(gt=0, le=600)
@@ -68,13 +68,13 @@ class ProviderBinding(BaseModel):
     @model_validator(mode="after")
     def validate_configuration_digest(self) -> Self:
         response_model_id = self.response_model_id or self.model_id
-        if self.provider == "mock":
-            valid_response_model = response_model_id == self.model_id
-        else:
+        if self.provider == "openai":
             valid_response_model = is_exact_or_dated_openai_snapshot(
                 self.model_id,
                 response_model_id,
             )
+        else:
+            valid_response_model = response_model_id == self.model_id
         if not valid_response_model:
             raise ValueError(
                 "Provider response model must be the exact requested model or its dated snapshot"
@@ -239,8 +239,10 @@ class EvaluationProtocol(BaseModel):
         if self.execution_mode is EvaluationExecutionMode.REAL_MODEL:
             if not self.real_model_authorized:
                 raise ValueError("REAL_MODEL execution must be explicitly authorized")
-            if self.provider_binding.provider != "openai":
-                raise ValueError("REAL_MODEL execution requires the OpenAI provider")
+            if self.provider_binding.provider not in {"openai", "deepseek"}:
+                raise ValueError(
+                    "REAL_MODEL execution requires a supported real-model provider"
+                )
         else:
             if self.real_model_authorized:
                 raise ValueError("OFFLINE_TEST cannot carry real-model authorization")

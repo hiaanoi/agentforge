@@ -210,6 +210,41 @@ def test_openai_binding_freezes_only_exact_alias_or_dated_snapshot() -> None:
         )
 
 
+def test_deepseek_binding_requires_exact_response_identity() -> None:
+    binding = provider_binding(
+        provider="deepseek",
+        model_id="deepseek-account-model",
+        response_model_id="deepseek-account-model",
+    )
+
+    assert binding.response_model_id == "deepseek-account-model"
+
+    with pytest.raises(ValidationError, match="response model"):
+        provider_binding(
+            provider="deepseek",
+            model_id="deepseek-account-model",
+            response_model_id="different-model",
+        )
+
+
+def test_real_model_protocol_accepts_deepseek_with_explicit_authorization() -> None:
+    deepseek = provider_binding(
+        provider="deepseek",
+        model_id="deepseek-account-model",
+    )
+
+    real = EvaluationProtocol.model_validate(
+        {
+            **protocol_payload(),
+            "execution_mode": "REAL_MODEL",
+            "provider_binding": deepseek,
+            "real_model_authorized": True,
+        }
+    )
+
+    assert real.provider_binding.provider == "deepseek"
+
+
 def test_replacement_policy_rejects_model_quality_failures() -> None:
     with pytest.raises(ValidationError, match="infrastructure"):
         ReplacementPolicy(

@@ -14,6 +14,7 @@ from agentforge.evaluation.real_model_gate import (
     RealModelExecutionGate,
 )
 from agentforge.models.base import ModelProvider, ModelRequest
+from agentforge.models.deepseek_provider import DeepSeekModelProvider
 from agentforge.models.domain import (
     ModelErrorCode,
     ModelProviderConfig,
@@ -170,19 +171,65 @@ class OpenAIEvaluationProviderFactory:
                 "Real-model execution gate rejected the Protocol"
             ) from exc
         binding = protocol.provider_binding
-        config = ModelProviderConfig(
-            api_key=self._api_key,
-            model=binding.model_id,
-            timeout_seconds=binding.timeout_seconds,
-            max_retries=binding.max_retries,
-            store=binding.store,
-            max_output_tokens=binding.max_output_tokens,
-            multi_tool_response_policy=binding.multi_tool_response_policy,
-            max_function_calls_per_response=(
-                binding.max_function_calls_per_response
-            ),
-        )
+        config = _provider_config(binding, self._api_key)
         return ProtocolBoundModelProvider(
             protocol,
             self._provider_builder(config),
         )
+
+
+class DeepSeekEvaluationProviderFactory:
+    def __init__(
+        self,
+        api_key: SecretStr,
+        *,
+        execution_gate: RealModelExecutionGate | None = None,
+        provider_builder: Callable[[ModelProviderConfig], ModelProvider]
+        | None = None,
+    ) -> None:
+        self._api_key = api_key
+        self._execution_gate = execution_gate
+        self._provider_builder = provider_builder or DeepSeekModelProvider
+
+    def create(self, protocol: EvaluationProtocol) -> ProtocolBoundModelProvider:
+        if (
+            protocol.execution_mode is not EvaluationExecutionMode.REAL_MODEL
+            or protocol.provider_binding.provider != "deepseek"
+            or not protocol.real_model_authorized
+        ):
+            raise EvaluationProviderBindingError(
+                "DeepSeek provider requires an authorized REAL_MODEL protocol"
+            )
+        if self._execution_gate is None:
+            raise EvaluationProviderBindingError(
+                "A validated real-model execution gate is required"
+            )
+        if not self._api_key.get_secret_value().strip():
+            raise EvaluationProviderBindingError(
+                "DeepSeek runtime secret is missing"
+            )
+        try:
+            self._execution_gate.require_protocol(protocol)
+        except RealModelAuthorizationError as exc:
+            raise EvaluationProviderBindingError(
+                "Real-model execution gate rejected the Protocol"
+            ) from exc
+        return ProtocolBoundModelProvider(
+            protocol,
+            self._provider_builder(
+                _provider_config(protocol.provider_binding, self._api_key)
+            ),
+        )
+
+
+def _provider_config(binding: ProviderBinding, api_key: SecretStr) -> ModelProviderConfig:
+    return ModelProviderConfig(
+        api_key=api_key,
+        model=binding.model_id,
+        timeout_seconds=binding.timeout_seconds,
+        max_retries=binding.max_retries,
+        store=binding.store,
+        max_output_tokens=binding.max_output_tokens,
+        multi_tool_response_policy=binding.multi_tool_response_policy,
+        max_function_calls_per_response=binding.max_function_calls_per_response,
+    )

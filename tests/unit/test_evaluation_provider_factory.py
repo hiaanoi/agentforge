@@ -14,6 +14,7 @@ from agentforge.evaluation.protocol import (
     ReplacementPolicy,
 )
 from agentforge.evaluation.provider_factory import (
+    DeepSeekEvaluationProviderFactory,
     EvaluationProviderBindingError,
     MockEvaluationProviderFactory,
     OpenAIEvaluationProviderFactory,
@@ -33,6 +34,7 @@ SHA = "a" * 64
 def protocol(
     *,
     real: bool,
+    provider: str = "openai",
     model_id: str = "bound-model",
     response_model_id: str | None = None,
     task_id: str = "self-durable-double-consumption",
@@ -49,7 +51,7 @@ def protocol(
         task_policy_digest=SHA,
         test_profile_template_digest=SHA,
         provider_binding=ProviderBinding(
-            provider="openai" if real else "mock",
+            provider=provider if real else "mock",
             model_id=model_id,
             response_model_id=response_model_id or model_id,
             timeout_seconds=45,
@@ -246,3 +248,48 @@ class _ValidatedGate:
         if value.protocol_digest != self._digest:
             raise RuntimeError("Protocol is not authorized")
         self.checked.append(value.protocol_digest)
+
+
+def test_deepseek_factory_maps_frozen_fields_and_redacts_secret() -> None:
+    captured: list[ModelProviderConfig] = []
+
+    def build(config: ModelProviderConfig) -> MockModelProvider:
+        captured.append(config)
+        return MockModelProvider(
+            [{"type": "final", "answer": "unused"}],
+            model_id=config.model,
+            provider_name="deepseek",
+        )
+
+    value = protocol(
+        real=True,
+        provider="deepseek",
+        model_id="deepseek-account-model",
+    )
+    gate = _ValidatedGate(value)
+    provider = DeepSeekEvaluationProviderFactory(
+        SecretStr("must-not-be-persisted"),
+        execution_gate=gate,
+        provider_builder=build,
+    ).create(value)
+
+    assert provider.name == "deepseek"
+    assert provider.journal_identity == "deepseek/deepseek-account-model"
+    assert len(captured) == 1
+    assert captured[0].model == "deepseek-account-model"
+    serialized = " ".join((value.model_dump_json(), repr(provider)))
+    assert "must-not-be-persisted" not in serialized
+    assert "api_key" not in serialized
+    assert gate.checked == [value.protocol_digest]
+
+
+def test_deepseek_factory_rejects_openai_or_missing_gate() -> None:
+    deepseek = protocol(real=True, provider="deepseek")
+    with pytest.raises(EvaluationProviderBindingError, match="gate"):
+        DeepSeekEvaluationProviderFactory(SecretStr("secret")).create(deepseek)
+
+    with pytest.raises(EvaluationProviderBindingError, match="DeepSeek"):
+        DeepSeekEvaluationProviderFactory(
+            SecretStr("secret"),
+            execution_gate=_ValidatedGate(deepseek),
+        ).create(protocol(real=True, provider="openai"))
