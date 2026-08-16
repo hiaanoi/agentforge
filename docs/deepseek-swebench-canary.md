@@ -60,7 +60,8 @@ export DEEPSEEK_MODEL
 先只发一个最多 400 output tokens 的只读请求：
 
 ```bash
-DEEPSEEK_LIVE_TEST=1 uv run --frozen pytest tests/live/test_deepseek_live.py -q
+RUN_LIVE_TESTS=1 DEEPSEEK_LIVE_TEST=1 \
+  uv run --frozen pytest tests/live/test_deepseek_live.py -q
 ```
 
 只有该命令通过才继续。默认执行测试套件时，因为没有 `DEEPSEEK_LIVE_TEST=1`，此测试必须显示为

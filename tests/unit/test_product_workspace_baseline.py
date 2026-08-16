@@ -22,7 +22,7 @@ from agentforge.evaluation.workspace import WorkspaceBaseline
 from agentforge.models.domain import ModelBudget
 from agentforge.persistence.application_uow import ApplicationUnitOfWork
 from agentforge.persistence.database import Database
-from agentforge.persistence.source_revisions import WorkspaceDigester
+from agentforge.persistence.source_revisions import WorkspaceDigester, WorkspaceDigestLimits
 from agentforge.persistence.tables import WorkspaceBaselineFileRow, WorkspaceBaselineRow
 from agentforge.tools.paths import WorkspacePathResolver
 
@@ -65,6 +65,29 @@ def test_capture_excludes_only_root_agentforge_directory(tmp_path: Path) -> None
         root, task_id="repair", command_id=prepared.baseline.baseline_id
     )
     assert after_runtime_churn.baseline.root_digest == prepared.baseline.root_digest
+
+
+def test_capture_skips_git_metadata_before_bounded_file_reads(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    (root / "a.py").write_text("ok\n", encoding="utf-8")
+    (root / ".git" / "objects").mkdir(parents=True)
+    (root / ".git" / "objects" / "large.pack").write_bytes(b"12345")
+    capture = ProductWorkspaceCapture(
+        WorkspaceDigester(
+            limits=WorkspaceDigestLimits(
+                max_entries=20,
+                max_files=10,
+                max_file_bytes=4,
+                max_total_bytes=20,
+            )
+        )
+    )
+
+    prepared = capture.capture(root, task_id="repair", command_id=uuid4())
+
+    assert [item.relative_path for item in prepared.baseline.files] == ["a.py"]
+    assert capture.matches_source(root, prepared.source_digest)
 
 
 def test_capture_rechecks_the_same_source_digest_before_driver_start(tmp_path: Path) -> None:

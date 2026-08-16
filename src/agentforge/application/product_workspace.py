@@ -57,10 +57,10 @@ class ProductWorkspaceCapture:
             raise ValueError("task_id must be a non-empty string")
         if not isinstance(command_id, UUID):
             raise TypeError("command_id must be a UUID")
-        # Root runtime state is not repairable source.  We intentionally exclude
-        # the entire managed directory (including config.toml) so a local runtime
-        # database and its WAL cannot race the capture. Nested .agentforge is
-        # ordinary user content and is therefore inventoried.
+        # Root runtime state and Git control data are not repairable source. We
+        # exclude them before bounded reads so database churn and large Git packs
+        # cannot race or exhaust the capture. Nested .agentforge is ordinary user
+        # content and is therefore inventoried.
         resolved, inventory, baseline_files = self._inventory(root)
         source_entries = tuple(
             entry
@@ -100,7 +100,7 @@ class ProductWorkspaceCapture:
         """Recompute the v1 source projection immediately before driver launch."""
 
         inventory = self._digester.inventory_snapshot(
-            root, exclude_directory=lambda parts: parts == (".agentforge",)
+            root, exclude_directory=self._excluded_inventory_directory
         )
         source_entries = tuple(
             entry
@@ -116,7 +116,7 @@ class ProductWorkspaceCapture:
         self, root: Path
     ) -> tuple[Path, WorkspaceSnapshot, tuple[WorkspaceFileBaseline, ...]]:
         inventory = self._digester.inventory_snapshot(
-            root, exclude_directory=lambda parts: parts == (".agentforge",)
+            root, exclude_directory=self._excluded_inventory_directory
         )
         files = tuple(
             WorkspaceFileBaseline(
@@ -129,6 +129,10 @@ class ProductWorkspaceCapture:
             for entry in inventory.entries
         )
         return root.resolve(strict=True), inventory, files
+
+    @staticmethod
+    def _excluded_inventory_directory(parts: tuple[str, ...]) -> bool:
+        return parts == (".agentforge",) or parts[-1] == ".git"
 
     @staticmethod
     def _manifest_digest(files: tuple[WorkspaceFileBaseline, ...]) -> str:
