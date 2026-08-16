@@ -225,6 +225,39 @@ async def test_search_text_honors_case_glob_and_large_file_limit(tmp_path: Path)
     database.close()
 
 
+@pytest.mark.asyncio
+async def test_search_text_accepts_a_single_workspace_file(tmp_path: Path) -> None:
+    executor, run, _, database, workspace, ownership = make_repository_harness(tmp_path)
+    (workspace / "target.py").write_text(
+        "first line\nNeedle in one file\n",
+        encoding="utf-8",
+    )
+    (workspace / "other.py").write_text("Needle elsewhere\n", encoding="utf-8")
+    (workspace / ".env").write_text("Needle secret\n", encoding="utf-8")
+
+    result = await executor.execute(
+        run,
+        "search_text",
+        {"query": "needle", "path": "target.py"},
+        ownership=ownership,
+    )
+
+    output = output_dict(result.output)
+    assert result.success
+    assert output["path"] == "target.py"
+    assert output["results"] == [
+        {"path": "target.py", "line_number": 2, "snippet": "Needle in one file"}
+    ]
+    sensitive = await executor.execute(
+        run,
+        "search_text",
+        {"query": "needle", "path": ".env"},
+        ownership=ownership,
+    )
+    assert sensitive.error_type is ToolErrorCode.SENSITIVE_PATH
+    database.close()
+
+
 def run_git(workspace: Path, *arguments: str) -> None:
     subprocess.run(
         ["git", *arguments],

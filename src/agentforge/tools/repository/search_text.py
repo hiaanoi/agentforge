@@ -1,4 +1,5 @@
-from pathlib import PurePosixPath
+from collections.abc import Iterable
+from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
@@ -18,8 +19,15 @@ from agentforge.tools.repository.common import (
 class SearchTextArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    query: str = Field(min_length=1, max_length=500)
-    path: str = "."
+    query: str = Field(
+        min_length=1,
+        max_length=500,
+        description="Non-empty text to search for.",
+    )
+    path: str = Field(
+        default=".",
+        description="Workspace-relative file or directory to search.",
+    )
     glob: str | None = Field(default=None, max_length=200)
     case_sensitive: bool = False
     max_results: int = Field(default=100, ge=1, le=1_000)
@@ -50,23 +58,37 @@ class SearchTextTool:
     def spec(self) -> ToolSpec:
         return ToolSpec(
             name="search_text",
-            description="Search bounded UTF-8 workspace files without invoking a shell.",
+            description=(
+                "Search a workspace-relative file or directory across bounded UTF-8 "
+                "files without invoking a shell."
+            ),
             input_schema=self.input_model.model_json_schema(),
             risk_level=ToolRisk.READ,
             path_argument="path",
-            path_kind=PathKind.DIRECTORY,
+            path_kind=PathKind.ANY,
+            protect_sensitive_path=True,
         )
 
     def execute(self, arguments: BaseModel) -> ToolResult:
         parsed = SearchTextArguments.model_validate(arguments)
-        root = self._resolver.resolve(parsed.path, PathKind.DIRECTORY)
+        root = self._resolver.resolve(parsed.path, PathKind.ANY)
+        files: Iterable[tuple[Path, str]]
+        if root.is_file():
+            relative = self._resolver.relative(root)
+            self._sensitive_files.require_allowed(relative)
+            files = ((root, relative),)
+        else:
+            files = iter_safe_files(
+                self._resolver,
+                self._sensitive_files,
+                root,
+                recursive=True,
+            )
         needle = parsed.query if parsed.case_sensitive else parsed.query.casefold()
         results: list[JsonValue] = []
         truncated = False
         skipped_large_files = 0
-        for file_path, relative in iter_safe_files(
-            self._resolver, self._sensitive_files, root, recursive=True
-        ):
+        for file_path, relative in files:
             if parsed.glob and not PurePosixPath(relative).match(parsed.glob):
                 continue
             if file_path.stat().st_size > MAX_SEARCH_FILE_BYTES:
