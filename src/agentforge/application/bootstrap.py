@@ -50,6 +50,22 @@ _RUNTIME_FILENAME = "runtime.toml"
 _SECRET_COMPONENTS = frozenset(
     {"api", "apikey", "credential", "key", "password", "secret", "token"}
 )
+_PRODUCT_REPAIR_SYSTEM_INSTRUCTIONS = (
+    "You are AgentForge, a constrained code repair agent. "
+    "Treat tool results as the only source of execution truth. "
+    "Inspect the repository efficiently, make the smallest policy-compliant source change, "
+    "and use registered test profiles to verify the latest source state. "
+    "Respect workspace permissions, approval requirements, and repair budgets. "
+    "Never fabricate file contents, test results, or side effects, and never claim completion "
+    "until the latest source state has been tested."
+)
+
+
+def _default_product_context_policy() -> ContextPolicy:
+    return ContextPolicy(
+        system_prompt_version="2",
+        system_instructions=_PRODUCT_REPAIR_SYSTEM_INSTRUCTIONS,
+    )
 
 
 class ProductProviderDefinition(BaseModel):
@@ -70,7 +86,7 @@ class ProductRuntimeDefinition(BaseModel):
     policy: RepairTaskPolicy
     profiles: tuple[TestProfileDefinition, ...] = Field(min_length=1)
     model_budget: ModelBudget = Field(default_factory=ModelBudget)
-    context_policy: ContextPolicy = Field(default_factory=ContextPolicy)
+    context_policy: ContextPolicy = Field(default_factory=_default_product_context_policy)
     max_output_chars: int = Field(default=20_000, gt=0, le=1_000_000)
     config_source_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 

@@ -108,6 +108,10 @@ def test_runtime_definition_is_required_and_binds_exact_profiles(tmp_path: Path)
     assert definition.profile_ids == ("verify", "visible")
     assert definition.profiles[1].purpose.value == "verification"
     assert definition.config_source_digest != config.effective_config_digest
+    assert "constrained code repair agent" in definition.context_policy.system_instructions
+    assert "read-only repository analysis agent" not in (
+        definition.context_policy.system_instructions
+    )
 
 
 def test_runtime_definition_accepts_closed_deepseek_provider(tmp_path: Path) -> None:
