@@ -178,11 +178,13 @@ def test_deepseek_provider_uses_only_runtime_environment_secret(
     provider = bootstrap._build_provider(
         ProductProviderDefinition(kind="deepseek"),
         config,
+        max_output_tokens=321,
     )
 
     assert provider.name == "deepseek"
     assert len(captured) == 1
     assert captured[0].model == "deepseek-account-model"
+    assert captured[0].max_output_tokens == 321
     assert "runtime-only-secret" not in captured[0].model_dump_json()
 
 

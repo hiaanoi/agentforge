@@ -152,7 +152,11 @@ class ProductApplicationFactory:
             profiles.register(profile)
 
         def build_runtime() -> tuple[RuntimeComponents, ProductStartRunAssembler]:
-            provider = _build_provider(definition.provider, config)
+            provider = _build_provider(
+                definition.provider,
+                config,
+                max_output_tokens=definition.model_budget.max_output_tokens_per_request,
+            )
             workflow = RepairWorkflow(database)
             components = RuntimeComponentFactory().build(
                 RuntimeAssemblyRequest(
@@ -209,7 +213,12 @@ class ProductApplicationFactory:
             raise UnsafeConfigurationError()
 
 
-def _build_provider(definition: ProductProviderDefinition, config: ProductConfig) -> object:
+def _build_provider(
+    definition: ProductProviderDefinition,
+    config: ProductConfig,
+    *,
+    max_output_tokens: int | None = None,
+) -> object:
     if definition.kind == "mock":
         # Product apps are reconstructed between durable approval/resume phases.
         # Choose mock answers by persisted step rather than process-local call
@@ -227,7 +236,13 @@ def _build_provider(definition: ProductProviderDefinition, config: ProductConfig
     value = os.environ.get(environment_name)
     if not value:
         raise UnsafeConfigurationError()
-    return provider_type(ModelProviderConfig(api_key=SecretStr(value), model=config.model))
+    return provider_type(
+        ModelProviderConfig(
+            api_key=SecretStr(value),
+            model=config.model,
+            max_output_tokens=max_output_tokens,
+        )
+    )
 
 
 def _validate_policy_profiles(definition: ProductRuntimeDefinition) -> None:
