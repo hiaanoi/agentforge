@@ -198,7 +198,7 @@ real-model Study 的具体范围，请从[评测指南](docs/evaluation_guide.md
   隐藏测试或原始 provider 数据；
 - 当前产品入口是 CLI；多轮交互会话/REPL（B）和面向公开发布的完整证据包（C）仍是后续范围。
 - 当前不提供 `arbitrary shell`、通用 `automatic bug repair`、`MCP server` 或 `web API`；
-  其他未明确实现和验证的 model provider 也属于后续范围。
+  除已实现的 OpenAI 与 DeepSeek 外，`additional model providers` 仍属于后续范围。
 
 AgentForge 已支持 DeepSeek provider，并可把 base-commit-bound 补丁导出为官方 SWE-bench
 prediction 格式。任何按当前路径产生的结果都只能表述为单实例 canary；它不是排行榜分数，也不
