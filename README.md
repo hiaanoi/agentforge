@@ -53,9 +53,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/demo_recovery.ps1
 
 ## 演示视频
 
-GitHub 录制版将以短视频形式展示同一条公开 Core CLI 路径：trust、跨进程 approval/resume、测试与
-最终 `VERIFIED`。视频发布前，请先按[录制脚本与清单](docs/demo-recording.zh-CN.md)复现并审查素材；
-成片将作为 GitHub Release 或公开视频页的外链发布，不提交视频二进制到仓库历史。
+GitHub 录制版展示同一条公开 Core CLI 路径：trust、跨进程 approval/resume、测试与最终
+`VERIFIED`。可直接[观看或下载 v0.1.1 Core CLI Demo（MP4）](https://github.com/hiaanoi/agentforge/releases/download/v0.1.1/agentforge-core-cli-demo-v0.1.1.mp4)，
+也可访问 [v0.1.1 Release](https://github.com/hiaanoi/agentforge/releases/tag/v0.1.1)。
+
+视频不提交到仓库历史；如需复现或审查素材，请先按[录制脚本与清单](docs/demo-recording.zh-CN.md)操作。
 
 ## 当前能力地图
 
