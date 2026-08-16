@@ -133,11 +133,12 @@ source = os.path.realpath(sys.argv[1])
 image = "$IMAGE"
 command = [
     os.path.realpath("/usr/bin/docker"), "run", "--rm", "--network", "none",
-    "--volume", f"{source}:/testbed:ro", "--workdir", "/testbed", image,
+    "--mount", f"type=bind,source={source},target=/workspace,readonly",
+    "--workdir", "/workspace", image,
     "/bin/bash", "-lc",
     "source /opt/miniconda3/bin/activate && conda activate testbed && "
     "export PYTHONDONTWRITEBYTECODE=1 && "
-    "python -m pytest -q -p no:cacheprovider sympy/core/tests/test_sympify.py",
+    "bin/test -C --verbose sympy/core/tests/test_sympify.py",
 ]
 raise SystemExit(subprocess.run(command, check=False, timeout=900).returncode)
 PY
