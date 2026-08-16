@@ -134,6 +134,30 @@ async def test_read_file_reads_utf8_and_truncates_large_content(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
+async def test_read_file_supports_bounded_byte_offsets(tmp_path: Path) -> None:
+    executor, run, _, database, workspace, ownership = make_repository_harness(tmp_path)
+    content = b"hello world again"
+    (workspace / "note.txt").write_bytes(content)
+
+    result = await executor.execute(
+        run,
+        "read_file",
+        {"path": "note.txt", "offset": 6, "max_bytes": 5},
+        ownership=ownership,
+    )
+
+    output = output_dict(result.output)
+    assert result.success
+    assert result.truncated
+    assert output["content"] == "world"
+    assert output["offset"] == 6
+    assert output["bytes_read"] == 5
+    assert output["byte_size"] == len(content)
+    assert output["sha256"] == hashlib.sha256(content).hexdigest()
+    database.close()
+
+
+@pytest.mark.asyncio
 async def test_read_file_rejects_binary_and_sensitive_files(tmp_path: Path) -> None:
     executor, run, events, database, workspace, ownership = make_repository_harness(tmp_path)
     (workspace / "binary.bin").write_bytes(b"abc\x00def")
