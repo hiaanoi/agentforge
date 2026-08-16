@@ -110,6 +110,108 @@ def test_runtime_definition_is_required_and_binds_exact_profiles(tmp_path: Path)
     assert definition.config_source_digest != config.effective_config_digest
 
 
+def test_runtime_definition_accepts_closed_deepseek_provider(tmp_path: Path) -> None:
+    from agentforge.application.bootstrap import ProductRuntimeDefinitionLoader
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    verifier = tmp_path / "verifier"
+    verifier.mkdir()
+    _write_runtime_definition(workspace, verifier)
+    runtime_path = workspace / ".agentforge" / "runtime.toml"
+    runtime_path.write_text(
+        runtime_path.read_text(encoding="utf-8").replace(
+            'kind = "mock"',
+            'kind = "deepseek"',
+        ).replace(
+            'mock_responses = [{ type = "tool_call", tool = "run_tests", '
+            'arguments = { profile_id = "visible" } }]\n',
+            "",
+        ),
+        encoding="utf-8",
+    )
+    config = ProductConfigLoader(user_root=tmp_path / "user").load(
+        workspace,
+        cli={
+            "database_path": ".agentforge/agentforge.db",
+            "model": "deepseek-account-model",
+            "profile_ids": ("verify", "visible"),
+        },
+    )
+
+    definition = ProductRuntimeDefinitionLoader().load(workspace, config=config)
+
+    assert definition.provider.kind == "deepseek"
+
+
+def test_deepseek_provider_uses_only_runtime_environment_secret(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentforge.application.bootstrap as bootstrap
+    from agentforge.application.bootstrap import ProductProviderDefinition
+    from agentforge.models.mock import MockModelProvider
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    captured = []
+    config = ProductConfigLoader(user_root=tmp_path / "user").load(
+        workspace,
+        cli={
+            "database_path": ".agentforge/agentforge.db",
+            "model": "deepseek-account-model",
+            "profile_ids": (),
+        },
+    )
+
+    def build(provider_config):
+        captured.append(provider_config)
+        return MockModelProvider(
+            [{"type": "final", "answer": "unused"}],
+            model_id=provider_config.model,
+            provider_name="deepseek",
+        )
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "runtime-only-secret")
+    monkeypatch.setattr(bootstrap, "DeepSeekModelProvider", build)
+
+    provider = bootstrap._build_provider(
+        ProductProviderDefinition(kind="deepseek"),
+        config,
+    )
+
+    assert provider.name == "deepseek"
+    assert len(captured) == 1
+    assert captured[0].model == "deepseek-account-model"
+    assert "runtime-only-secret" not in captured[0].model_dump_json()
+
+
+def test_deepseek_provider_rejects_missing_runtime_secret(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentforge.application.bootstrap as bootstrap
+    from agentforge.application.bootstrap import ProductProviderDefinition
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    config = ProductConfigLoader(user_root=tmp_path / "user").load(
+        workspace,
+        cli={
+            "database_path": ".agentforge/agentforge.db",
+            "model": "deepseek-account-model",
+            "profile_ids": (),
+        },
+    )
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    with pytest.raises(UnsafeConfigurationError):
+        bootstrap._build_provider(
+            ProductProviderDefinition(kind="deepseek"),
+            config,
+        )
+
+
 def test_runtime_definition_rejects_secret_fields(tmp_path: Path) -> None:
     from agentforge.application.bootstrap import ProductRuntimeDefinitionLoader
 

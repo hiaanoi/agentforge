@@ -36,6 +36,7 @@ from agentforge.application.runtime_factory import (
 from agentforge.context.models import ContextPolicy
 from agentforge.domain.enums import ConfigSourceKind
 from agentforge.domain.repair import RepairTaskPolicy
+from agentforge.models.deepseek_provider import DeepSeekModelProvider
 from agentforge.models.domain import ModelBudget, ModelProviderConfig
 from agentforge.models.mock import MockModelProvider
 from agentforge.models.openai_provider import OpenAIModelProvider
@@ -56,7 +57,7 @@ class ProductProviderDefinition(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    kind: Literal["openai", "mock"]
+    kind: Literal["openai", "deepseek", "mock"]
     mock_responses: tuple[JsonValue, ...] = ()
 
 
@@ -194,7 +195,11 @@ class ProductApplicationFactory:
         profiles = TestProfileRegistry(WorkspacePathResolver(root))
         for profile in definition.profiles:
             profiles.register(profile)
-        return Doctor(Database.read_only_from_path(config.database_path), profiles)
+        return Doctor(
+            Database.read_only_from_path(config.database_path),
+            profiles,
+            provider_kind=definition.provider.kind,
+        )
 
     @staticmethod
     def _validate_database_location(root: Path, config: ProductConfig) -> None:
@@ -212,12 +217,17 @@ def _build_provider(definition: ProductProviderDefinition, config: ProductConfig
         return MockModelProvider(
             list(definition.mock_responses), model_id=config.model, response_by_step=True
         )
-    value = os.environ.get("OPENAI_API_KEY")
+    provider_type: type[OpenAIModelProvider] | type[DeepSeekModelProvider]
+    if definition.kind == "openai":
+        environment_name = "OPENAI_API_KEY"
+        provider_type = OpenAIModelProvider
+    else:
+        environment_name = "DEEPSEEK_API_KEY"
+        provider_type = DeepSeekModelProvider
+    value = os.environ.get(environment_name)
     if not value:
         raise UnsafeConfigurationError()
-    return OpenAIModelProvider(
-        ModelProviderConfig(api_key=SecretStr(value), model=config.model)
-    )
+    return provider_type(ModelProviderConfig(api_key=SecretStr(value), model=config.model))
 
 
 def _validate_policy_profiles(definition: ProductRuntimeDefinition) -> None:

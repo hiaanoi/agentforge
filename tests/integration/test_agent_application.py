@@ -352,6 +352,33 @@ def test_doctor_never_creates_a_missing_sqlite_database(tmp_path: Path) -> None:
     assert not missing.exists()
 
 
+def test_doctor_reports_only_the_selected_provider_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "deepseek-doctor-must-not-leak"
+    monkeypatch.setenv("DEEPSEEK_API_KEY", secret)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    database = Database.from_path(tmp_path / "missing.db")
+
+    report = Doctor(database, provider_kind="deepseek").report(tmp_path)
+
+    checks = {check.check: check for check in report.checks}
+    assert "deepseek_environment" in checks
+    assert "openai_environment" not in checks
+    assert checks["deepseek_environment"].status.value == "PASS"
+    assert secret not in report.model_dump_json()
+
+
+def test_mock_doctor_requires_no_remote_credentials(tmp_path: Path) -> None:
+    database = Database.from_path(tmp_path / "missing.db")
+
+    report = Doctor(database, provider_kind="mock").report(tmp_path)
+
+    check = next(item for item in report.checks if item.check == "mock_environment")
+    assert check.status.value == "PASS"
+
+
 @pytest.mark.asyncio
 async def test_application_close_is_idempotent_and_does_not_close_database(
     tmp_path: Path,

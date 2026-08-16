@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import stat
 from pathlib import Path
+from typing import Literal
 from uuid import UUID
 
 from agentforge.application.product_workspace import ProductWorkspaceCapture
@@ -14,16 +15,23 @@ from agentforge.tools.testing.profiles import TestProfileRegistry
 class Doctor:
     """Read-only, deliberately low-detail installation diagnostics."""
 
-    def __init__(self, database: Database, profiles: TestProfileRegistry | None = None) -> None:
+    def __init__(
+        self,
+        database: Database,
+        profiles: TestProfileRegistry | None = None,
+        *,
+        provider_kind: Literal["openai", "deepseek", "mock"] = "openai",
+    ) -> None:
         self._database = database
         self._profiles = profiles
+        self._provider_kind = provider_kind
 
     def report(self, workspace: Path) -> DoctorReportView:
         checks = [
             self._schema(),
             self._workspace(workspace),
             self._source(workspace),
-            self._openai_environment(),
+            self._provider_environment(),
             self._git(workspace),
         ]
         checks.append(self._profiles_check())
@@ -89,15 +97,26 @@ class Doctor:
             safe_message="Workspace is available." if valid else "Workspace is unavailable.",
         )
 
-    @staticmethod
-    def _openai_environment() -> DoctorCheckView:
-        present = bool(os.environ.get("OPENAI_API_KEY"))
+    def _provider_environment(self) -> DoctorCheckView:
+        if self._provider_kind == "mock":
+            return DoctorCheckView(
+                check="mock_environment",
+                status=DoctorCheckStatus.PASS,
+                safe_message="Mock provider requires no remote credentials.",
+            )
+        environment_name = (
+            "OPENAI_API_KEY"
+            if self._provider_kind == "openai"
+            else "DEEPSEEK_API_KEY"
+        )
+        provider_name = "OpenAI" if self._provider_kind == "openai" else "DeepSeek"
+        present = bool(os.environ.get(environment_name))
         return DoctorCheckView(
-            check="openai_environment",
+            check=f"{self._provider_kind}_environment",
             status=DoctorCheckStatus.PASS if present else DoctorCheckStatus.WARN,
-            safe_message="OpenAI credentials are configured."
+            safe_message=f"{provider_name} credentials are configured."
             if present
-            else "OpenAI credentials are not configured.",
+            else f"{provider_name} credentials are not configured.",
         )
 
     @staticmethod
