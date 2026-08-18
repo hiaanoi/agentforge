@@ -345,6 +345,69 @@ def test_finalizer_rejects_wrong_prediction_checkout_and_model_identity(tmp_path
         )
 
 
+def test_finalizer_recomputes_forged_model_copy_patch_digest(tmp_path: Path) -> None:
+    protocol = load_verified10_protocol(PROTOCOL_PATH)
+    predictions = []
+    attempts = []
+    for task in protocol.tasks:
+        binding = SWEbenchInstanceBinding(
+            instance_id=task.instance_id, repo=task.repo, base_commit=task.base_commit
+        )
+        prediction = SWEbenchPrediction.empty(binding, protocol.model)
+        predictions.append(prediction)
+        attempts.append(
+            BenchmarkAttemptRecord(
+                protocol_sha256=protocol.protocol_sha256,
+                arm=BenchmarkArm.AGENTFORGE,
+                instance_id=task.instance_id,
+                attempt_index=1,
+                status=AttemptStatus.FAILED,
+                prediction_patch_sha256=prediction.patch_sha256,
+            )
+        )
+    forged = predictions[0].model_copy(update={"model_patch": "forged"})
+    with pytest.raises(CampaignArtifactError, match="patch digest"):
+        finalize_verified10_campaign(
+            protocol,
+            attempts,
+            [forged, *predictions[1:]],
+            tmp_path / "forged.json",
+            tmp_path / "forged-ledger.json",
+        )
+
+
+def test_finalizer_rejects_nonterminal_attempts(tmp_path: Path) -> None:
+    protocol = load_verified10_protocol(PROTOCOL_PATH)
+    predictions = []
+    attempts = []
+    for task in protocol.tasks:
+        binding = SWEbenchInstanceBinding(
+            instance_id=task.instance_id, repo=task.repo, base_commit=task.base_commit
+        )
+        prediction = SWEbenchPrediction.empty(binding, protocol.model)
+        predictions.append(prediction)
+        attempts.append(
+            BenchmarkAttemptRecord(
+                protocol_sha256=protocol.protocol_sha256,
+                arm=BenchmarkArm.AGENTFORGE,
+                instance_id=task.instance_id,
+                attempt_index=1,
+                status=AttemptStatus.FAILED,
+                prediction_patch_sha256=prediction.patch_sha256,
+            )
+        )
+    for status in (AttemptStatus.PLANNED, AttemptStatus.RUNNING):
+        nonterminal = [attempts[0].model_copy(update={"status": status}), *attempts[1:]]
+        with pytest.raises(CampaignArtifactError, match="terminal"):
+            finalize_verified10_campaign(
+                protocol,
+                nonterminal,
+                predictions,
+                tmp_path / f"{status.value}.json",
+                tmp_path / f"{status.value}-ledger.json",
+            )
+
+
 @pytest.mark.parametrize("content", [b"\x80", b"{", b"[]", b'{"schema_version": 999}'])
 def test_loader_wraps_malformed_protocol_as_domain_error(tmp_path: Path, content: bytes) -> None:
     path = tmp_path / "bad.json"

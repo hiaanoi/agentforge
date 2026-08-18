@@ -458,6 +458,11 @@ def finalize_verified10_campaign(
     arms = {record.arm for record in attempts}
     if len(arms) != 1 or (arm is not None and arms != {arm}):
         raise CampaignArtifactError("Campaign attempts contain cross-arm records")
+    if any(
+        record.status not in {AttemptStatus.COMPLETED, AttemptStatus.FAILED}
+        for record in attempts
+    ):
+        raise CampaignArtifactError("Campaign attempts must have terminal status")
     attempt_ids = [record.instance_id for record in attempts]
     prediction_ids = [prediction.instance_id for prediction in predictions]
     if len(set(attempt_ids)) != len(attempt_ids) or len(set(prediction_ids)) != len(prediction_ids):
@@ -480,6 +485,9 @@ def finalize_verified10_campaign(
             raise CampaignArtifactError("Prediction model identity does not match campaign arm")
         if record.attempt_index != 1:
             raise CampaignArtifactError("Campaign attempt index is not one")
+        actual_patch_sha256 = hashlib.sha256(prediction.model_patch.encode("utf-8")).hexdigest()
+        if prediction.patch_sha256 != actual_patch_sha256:
+            raise CampaignArtifactError("Prediction patch digest does not match model patch bytes")
         if record.prediction_patch_sha256 != prediction.patch_sha256:
             raise CampaignArtifactError("Prediction patch digest does not match attempt ledger")
         if prediction.model_patch:
@@ -488,10 +496,10 @@ def finalize_verified10_campaign(
                 or record.failure_class is not AttemptFailureClass.NONE
             ):
                 raise CampaignArtifactError("Non-empty prediction must be a completed attempt")
-        elif record.status is AttemptStatus.COMPLETED and record.failure_class not in {
-            AttemptFailureClass.NONE,
-            AttemptFailureClass.EMPTY,
-        }:
+        elif (
+            record.status is AttemptStatus.COMPLETED
+            and record.failure_class is not AttemptFailureClass.EMPTY
+        ):
             raise CampaignArtifactError("Completed empty prediction has an invalid failure class")
     try:
         save_swebench_predictions(
