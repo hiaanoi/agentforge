@@ -10,6 +10,7 @@ from agentforge.evaluation.verified10_campaign import (
     EXPECTED_INSTANCE_IDS,
     FORBIDDEN_GENERATION_FIELDS,
     AttemptStatus,
+    AttemptFailureClass,
     BenchmarkArm,
     BenchmarkAttemptRecord,
     Verified10Protocol,
@@ -20,7 +21,9 @@ from agentforge.evaluation.verified10_campaign import (
     project_public_task,
     public_task_sha256,
     validate_public_task,
+    finalize_verified10_campaign,
 )
+from agentforge.evaluation.swebench_prediction import SWEbenchInstanceBinding, SWEbenchPrediction
 
 ROOT = Path(__file__).parents[2]
 PROTOCOL_PATH = ROOT / "evaluation" / "protocols" / "verified10-deepseek-flash-pass1.json"
@@ -211,6 +214,93 @@ def test_enum_attempt_record_json_roundtrip() -> None:
         status=AttemptStatus.COMPLETED,
     )
     assert BenchmarkAttemptRecord.model_validate_json(record.model_dump_json()) == record
+
+
+def test_attempt_record_carries_typed_failure_and_private_telemetry() -> None:
+    protocol = load_verified10_protocol(PROTOCOL_PATH)
+    record = BenchmarkAttemptRecord(
+        protocol_sha256=protocol.protocol_sha256,
+        arm=BenchmarkArm.AGENTFORGE,
+        instance_id=EXPECTED_INSTANCE_IDS[0],
+        attempt_index=1,
+        status=AttemptStatus.FAILED,
+        failure_class=AttemptFailureClass.TIMEOUT,
+        model_calls=3,
+        steps=8,
+        provider_prompt_tokens=10,
+        provider_completion_tokens=20,
+        approval_count=1,
+        edit_count=2,
+        test_count=3,
+        wall_time_seconds=4.5,
+        trajectory_path="trajectories/one.json",
+        trajectory_sha256="a" * 64,
+    )
+    assert record.failure_class is AttemptFailureClass.TIMEOUT
+    assert record.trajectory_path == "trajectories/one.json"
+    assert BenchmarkAttemptRecord.model_validate_json(record.model_dump_json()) == record
+
+
+def test_finalizer_exports_ten_public_rows_and_private_ledger(tmp_path: Path) -> None:
+    protocol = load_verified10_protocol(PROTOCOL_PATH)
+    model_identity = "deepseek/account-model"
+    predictions = []
+    attempts = []
+    failure_classes = (
+        AttemptFailureClass.NONE,
+        AttemptFailureClass.EMPTY,
+        AttemptFailureClass.COMPATIBILITY_FAILED,
+        AttemptFailureClass.MODEL_FAILED,
+        AttemptFailureClass.TIMEOUT,
+    )
+    for index, task in enumerate(protocol.tasks):
+        binding = SWEbenchInstanceBinding(
+            instance_id=task.instance_id, repo=task.repo, base_commit=task.base_commit
+        )
+        if index == 0:
+            patch = "diff --git a/x b/x\n"
+            prediction = SWEbenchPrediction(
+                instance_id=task.instance_id,
+                model_name_or_path="agentforge:" + model_identity,
+                model_patch=patch,
+                base_commit=task.base_commit,
+                patch_sha256=hashlib.sha256(patch.encode()).hexdigest(),
+            )
+            status = AttemptStatus.COMPLETED
+            failure_class = AttemptFailureClass.NONE
+            patch_hash = prediction.patch_sha256
+        else:
+            prediction = SWEbenchPrediction.empty(binding, model_identity)
+            status = AttemptStatus.COMPLETED if index == 1 else AttemptStatus.FAILED
+            failure_class = failure_classes[index % len(failure_classes)]
+            patch_hash = prediction.patch_sha256
+        predictions.append(prediction)
+        attempts.append(
+            BenchmarkAttemptRecord(
+                protocol_sha256=protocol.protocol_sha256,
+                arm=BenchmarkArm.AGENTFORGE,
+                instance_id=task.instance_id,
+                attempt_index=1,
+                status=status,
+                failure_class=failure_class,
+                prediction_patch_sha256=patch_hash,
+                trajectory_path=f"trajectories/{index}.json",
+            )
+        )
+    result = finalize_verified10_campaign(
+        protocol,
+        list(reversed(attempts)),
+        list(reversed(predictions)),
+        tmp_path / "predictions.json",
+        tmp_path / "ledger.json",
+    )
+    public = json.loads((tmp_path / "predictions.json").read_text())
+    ledger = json.loads((tmp_path / "ledger.json").read_text())
+    assert [row["instance_id"] for row in public] == list(EXPECTED_INSTANCE_IDS)
+    assert len(ledger) == 10
+    assert all(set(row) == {"instance_id", "model_name_or_path", "model_patch"} for row in public)
+    assert result.predictions_sha256 == hashlib.sha256((tmp_path / "predictions.json").read_bytes()).hexdigest()
+    assert result.ledger_sha256 == hashlib.sha256((tmp_path / "ledger.json").read_bytes()).hexdigest()
 
 
 @pytest.mark.parametrize("content", [b"\x80", b"{", b"[]", b'{"schema_version": 999}'])

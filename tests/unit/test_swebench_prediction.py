@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import subprocess
@@ -10,10 +11,12 @@ from pathlib import Path
 import pytest
 
 from agentforge.evaluation.swebench_prediction import (
+    SWEbenchPrediction,
     SWEbenchInstanceBinding,
     SWEbenchPredictionError,
     SWEbenchPredictionExporter,
     save_swebench_prediction,
+    save_swebench_predictions,
 )
 
 
@@ -70,6 +73,17 @@ def test_capture_binds_standard_prediction_to_base_commit(tmp_path: Path) -> Non
         "model_name_or_path": "agentforge:deepseek/account-model",
         "model_patch": prediction.model_patch,
     }
+
+
+def test_empty_prediction_preserves_failure_as_standard_record() -> None:
+    binding = _binding("a" * 40)
+
+    prediction = SWEbenchPrediction.empty(binding, "deepseek/account-model")
+
+    assert prediction.model_patch == ""
+    assert prediction.patch_sha256 == hashlib.sha256(b"").hexdigest()
+    assert prediction.base_commit == binding.base_commit
+    assert prediction.model_name_or_path == "agentforge:deepseek/account-model"
 
 
 def test_capture_rejects_wrong_head(tmp_path: Path) -> None:
@@ -193,6 +207,32 @@ def test_save_writes_one_standard_jsonl_record_atomically(tmp_path: Path) -> Non
     assert len(lines) == 1
     assert json.loads(lines[0]) == prediction.harness_record()
     assert not output.with_name(f".{output.name}.tmp").exists()
+
+
+def test_save_predictions_orders_shuffled_input_and_rejects_wrong_denominator(
+    tmp_path: Path,
+) -> None:
+    predictions = [
+        SWEbenchPrediction.empty(
+            SWEbenchInstanceBinding(
+                instance_id=instance_id,
+                repo="sympy/sympy",
+                base_commit="a" * 40,
+            ),
+            "deepseek/account-model",
+        )
+        for instance_id in ("instance-b", "instance-a")
+    ]
+    output = tmp_path / "predictions.json"
+    save_swebench_predictions(
+        output, list(reversed(predictions)), expected_instance_ids=("instance-a", "instance-b")
+    )
+    assert [row["instance_id"] for row in json.loads(output.read_text())] == [
+        "instance-a",
+        "instance-b",
+    ]
+    with pytest.raises(SWEbenchPredictionError, match="duplicate"):
+        save_swebench_predictions(output, predictions, expected_instance_ids=("instance-a", "instance-a"))
 
 
 def test_cli_exports_without_printing_patch(

@@ -6,6 +6,9 @@ does not run an agent, call a model, generate predictions, or score a patch.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from pathlib import Path
@@ -21,6 +24,11 @@ from pydantic import (
 )
 
 from agentforge.evaluation.protocol import canonical_digest
+from agentforge.evaluation.swebench_prediction import (
+    SWEbenchPrediction,
+    SWEbenchPredictionError,
+    save_swebench_predictions,
+)
 
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 GIT_COMMIT_PATTERN = r"^[0-9a-f]{40}$"
@@ -170,6 +178,17 @@ class AttemptStatus(StrEnum):
 
 
 ATTEMPT_STATUS_VALUES = tuple(item.value for item in AttemptStatus)
+
+
+class AttemptFailureClass(StrEnum):
+    NONE = "NONE"
+    EMPTY = "EMPTY"
+    EMPTY_PATCH = "EMPTY"
+    COMPATIBILITY_FAILED = "COMPATIBILITY_FAILED"
+    COMPATIBILITY = "COMPATIBILITY_FAILED"
+    MODEL_FAILED = "MODEL_FAILED"
+    MODEL = "MODEL_FAILED"
+    TIMEOUT = "TIMEOUT"
 
 
 class _FrozenModel(BaseModel):
@@ -352,10 +371,150 @@ class BenchmarkAttemptRecord(_FrozenModel):
     instance_id: str = Field(min_length=1, max_length=200)
     attempt_index: Literal[1]
     status: AttemptStatus
+    failure_class: AttemptFailureClass = AttemptFailureClass.NONE
+    model_calls: int = Field(default=0, ge=0)
+    steps: int = Field(default=0, ge=0)
+    provider_prompt_tokens: int = Field(default=0, ge=0)
+    provider_completion_tokens: int = Field(default=0, ge=0)
+    provider_total_tokens: int = Field(default=0, ge=0)
+    approval_count: int = Field(default=0, ge=0)
+    edit_count: int = Field(default=0, ge=0)
+    test_count: int = Field(default=0, ge=0)
+    wall_time_seconds: float = Field(default=0.0, ge=0.0)
+    trajectory_path: str | None = Field(default=None, max_length=500)
+    trajectory_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    prediction_patch_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+
+    @field_validator("trajectory_path")
+    @classmethod
+    def validate_trajectory_path(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.replace("\\", "/")
+        if not normalized or normalized.startswith("/") or ":" in normalized:
+            raise ValueError("trajectory_path must be artifact-relative")
+        if any(part in {"", ".", ".."} for part in normalized.split("/")):
+            raise ValueError("trajectory_path must not contain absolute or parent paths")
+        return normalized
 
 
 class Verified10ProtocolError(ValueError):
     """Stable domain error for every protocol loading failure."""
+
+
+class CampaignArtifactError(Verified10ProtocolError):
+    """Stable domain error for campaign artifact loading and finalization."""
+
+
+class CampaignArtifactResult(_FrozenModel):
+    predictions_sha256: str = Field(pattern=SHA256_PATTERN)
+    ledger_sha256: str = Field(pattern=SHA256_PATTERN)
+
+
+def save_attempt_ledger(path: str | Path, attempts: Sequence[BenchmarkAttemptRecord]) -> str:
+    """Atomically save the private attempt ledger and return its written-byte digest."""
+
+    target = Path(path).expanduser().resolve(strict=False)
+    payload = json.dumps(
+        [record.model_dump(mode="json") for record in attempts],
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8") + b"\n"
+    _atomic_artifact_write(target, payload)
+    return hashlib.sha256(target.read_bytes()).hexdigest()
+
+
+def load_attempt_ledger(path: str | Path) -> tuple[BenchmarkAttemptRecord, ...]:
+    """Read and strictly validate a private attempt ledger."""
+
+    try:
+        content = Path(path).expanduser().resolve(strict=True).read_bytes()
+        decoded = json.loads(content)
+        if not isinstance(decoded, list):
+            raise ValueError
+        return tuple(BenchmarkAttemptRecord.model_validate(item) for item in decoded)
+    except (OSError, UnicodeError, ValueError, TypeError, ValidationError):
+        raise CampaignArtifactError("Unable to load campaign attempt ledger") from None
+
+
+def finalize_verified10_campaign(
+    protocol: Verified10Protocol,
+    attempts: Sequence[BenchmarkAttemptRecord],
+    predictions: Sequence[SWEbenchPrediction],
+    prediction_path: str | Path,
+    ledger_path: str | Path,
+    arm: BenchmarkArm | None = None,
+) -> CampaignArtifactResult:
+    """Validate a complete pass and atomically emit public predictions plus private ledger."""
+
+    expected_ids = tuple(task.instance_id for task in protocol.tasks)
+    if len(attempts) != len(expected_ids) or len(predictions) != len(expected_ids):
+        raise CampaignArtifactError(
+            "Campaign finalizer requires exactly ten attempts and predictions"
+        )
+    if any(record.protocol_sha256 != protocol.protocol_sha256 for record in attempts):
+        raise CampaignArtifactError("Campaign attempt protocol digest mismatch")
+    arms = {record.arm for record in attempts}
+    if len(arms) != 1 or (arm is not None and arms != {arm}):
+        raise CampaignArtifactError("Campaign attempts contain cross-arm records")
+    attempt_ids = [record.instance_id for record in attempts]
+    prediction_ids = [prediction.instance_id for prediction in predictions]
+    if len(set(attempt_ids)) != len(attempt_ids) or len(set(prediction_ids)) != len(prediction_ids):
+        raise CampaignArtifactError("Campaign attempts or predictions contain duplicate IDs")
+    if set(attempt_ids) != set(expected_ids) or set(prediction_ids) != set(expected_ids):
+        raise CampaignArtifactError("Campaign attempts or predictions do not cover the protocol")
+    by_attempt = {record.instance_id: record for record in attempts}
+    by_prediction = {prediction.instance_id: prediction for prediction in predictions}
+    for instance_id in expected_ids:
+        record = by_attempt[instance_id]
+        prediction = by_prediction[instance_id]
+        if record.attempt_index != 1:
+            raise CampaignArtifactError("Campaign attempt index is not one")
+        if record.prediction_patch_sha256 != prediction.patch_sha256:
+            raise CampaignArtifactError("Prediction patch digest does not match attempt ledger")
+        if prediction.model_patch:
+            if (
+                record.status is not AttemptStatus.COMPLETED
+                or record.failure_class is not AttemptFailureClass.NONE
+            ):
+                raise CampaignArtifactError("Non-empty prediction must be a completed attempt")
+        elif record.status is AttemptStatus.COMPLETED and record.failure_class not in {
+            AttemptFailureClass.NONE,
+            AttemptFailureClass.EMPTY,
+        }:
+            raise CampaignArtifactError("Completed empty prediction has an invalid failure class")
+    try:
+        save_swebench_predictions(
+            Path(prediction_path),
+            tuple(by_prediction.values()),
+            expected_instance_ids=expected_ids,
+        )
+    except (OSError, SWEbenchPredictionError):
+        raise CampaignArtifactError("Unable to save campaign predictions") from None
+    ledger_digest = save_attempt_ledger(ledger_path, attempts)
+    prediction_digest = hashlib.sha256(Path(prediction_path).read_bytes()).hexdigest()
+    return CampaignArtifactResult(
+        predictions_sha256=prediction_digest,
+        ledger_sha256=ledger_digest,
+    )
+
+
+def _atomic_artifact_write(target: Path, payload: bytes) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.tmp")
+    try:
+        with temporary.open("wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+    except OSError:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise CampaignArtifactError("Unable to save campaign artifact") from None
 
 
 def project_public_task(row: Mapping[str, object]) -> dict[str, str]:
