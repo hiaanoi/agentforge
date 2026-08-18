@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -12,9 +13,13 @@ from agentforge.evaluation.verified10_campaign import (
     BenchmarkArm,
     BenchmarkAttemptRecord,
     Verified10Protocol,
+    Verified10ProtocolError,
+    Verified10Task,
+    canonical_digest,
     load_verified10_protocol,
     project_public_task,
-    validate_public_dataset_rows,
+    public_task_sha256,
+    validate_public_task,
 )
 
 ROOT = Path(__file__).parents[2]
@@ -36,6 +41,46 @@ def test_protocol_artifact_is_loadable_and_frozen() -> None:
         Verified10Protocol.model_validate({**protocol.model_dump(mode="json"), "unexpected": 1})
     with pytest.raises(ValidationError):
         protocol.dataset_split = "train"  # type: ignore[misc]
+
+
+def test_protocol_digest_has_independent_known_encoding_and_mutation_sensitivity() -> None:
+    protocol = load_verified10_protocol(PROTOCOL_PATH)
+    payload = protocol.model_dump(mode="json")
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    expected = hashlib.sha256(encoded).hexdigest()
+    assert expected == "d57db5029157ff9eea5f722c8977834ff98e7facd24eec7470e7fbcb48e3d231"
+    assert protocol.protocol_sha256 == expected
+    reordered = {key: payload[key] for key in reversed(tuple(payload))}
+    assert hashlib.sha256(
+        json.dumps(reordered, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest() == expected
+    mutated = json.loads(json.dumps(payload))
+    mutated["mini_budget"]["step_limit"] = 51
+    assert canonical_digest(mutated) != expected
+
+
+def test_prior_artifact_mapping_is_explicitly_checked_in_the_test() -> None:
+    protocol = load_verified10_protocol(PROTOCOL_PATH)
+    assert protocol.prior_baseline.artifacts.model_dump(mode="json") == {
+        "selection_sha256": "9c385f13580c05e3cb5590e2abb43b278fa8ed99597315d7010f6953785ca9c0",
+        "experiment_protocol_sha256": (
+            "b511f1c6c7974f7b36ed1eb4ba9ee7435a6dcf21211b7ed5e879fe9fcc06c62a"
+        ),
+        "agentforge_predictions_sha256": (
+            "2e98e29e37f5c42598fe055c1db5972a44bec9d5d68ad3721cf9e00c40efaf48"
+        ),
+        "mini_swe_agent_predictions_sha256": (
+            "42fcc0377abdb3538a12ea814a862b9ddd46dfb69fef544058a817134373e1fb"
+        ),
+        "agentforge_official_report_sha256": (
+            "a9c19d540f1170d9026161c4bdf997c1b487bd000208f3fe8b2044b5ddea0243"
+        ),
+        "mini_swe_agent_official_report_sha256": (
+            "9d6274d5ad446dde3cf000276466da8a00bd0203e01fffdc8ebe7a7a0ca48c9f"
+        ),
+    }
 
 
 def test_enums_are_closed() -> None:
@@ -112,20 +157,26 @@ def test_public_projection_rejects_private_generation_fields() -> None:
         project_public_task(row)
 
 
-def test_runtime_rows_are_checked_against_frozen_public_hashes() -> None:
-    protocol = load_verified10_protocol(PROTOCOL_PATH)
-    rows = [
-        {
-            "instance_id": task.instance_id,
-            "repo": task.repo,
-            "base_commit": task.base_commit,
-            "problem_statement": f"issue {task.instance_id}",
-        }
-        for task in protocol.tasks
-    ]
-    rows[0]["problem_statement"] = "different public issue"
+def test_public_hash_runtime_positive_control_then_single_field_mutation() -> None:
+    row = {
+        "instance_id": "django__django-12419",
+        "repo": "django/django",
+        "base_commit": "7fa1a93c6c8109010a6ff3f604fda83b604e0e97",
+        "problem_statement": "public issue",
+    }
+    assert public_task_sha256(**row) == (
+        "917d1e57ab2b7527a08df04522802a4d917facade27965b9b6a110534b6000be"
+    )
+    task = Verified10Task(
+        instance_id=row["instance_id"],
+        repo=row["repo"],
+        base_commit=row["base_commit"],
+        public_task_sha256="917d1e57ab2b7527a08df04522802a4d917facade27965b9b6a110534b6000be",
+    )
+    assert validate_public_task(row, task) == row
+    row["problem_statement"] = "mutated public issue"
     with pytest.raises(ValueError, match=r"hash|mismatch"):
-        validate_public_dataset_rows(rows, protocol)
+        validate_public_task(row, task)
 
 
 def test_attempt_record_is_frozen_and_requires_one_based_attempt() -> None:
@@ -141,8 +192,40 @@ def test_attempt_record_is_frozen_and_requires_one_based_attempt() -> None:
     with pytest.raises(ValidationError):
         BenchmarkAttemptRecord(
             protocol_sha256=protocol.protocol_sha256,
-            arm="AGENTFORGE",
+            arm=BenchmarkArm.AGENTFORGE,
             instance_id=EXPECTED_INSTANCE_IDS[0],
             attempt_index=2,
-            status="PLANNED",
+            status=AttemptStatus.PLANNED,
         )
+    with pytest.raises(ValidationError):
+        record.status = AttemptStatus.COMPLETED  # type: ignore[misc]
+
+
+def test_enum_attempt_record_json_roundtrip() -> None:
+    protocol = load_verified10_protocol(PROTOCOL_PATH)
+    record = BenchmarkAttemptRecord(
+        protocol_sha256=protocol.protocol_sha256,
+        arm=BenchmarkArm.MINI_SWE_AGENT,
+        instance_id=EXPECTED_INSTANCE_IDS[0],
+        attempt_index=1,
+        status=AttemptStatus.COMPLETED,
+    )
+    assert BenchmarkAttemptRecord.model_validate_json(record.model_dump_json()) == record
+
+
+@pytest.mark.parametrize("content", [b"\x80", b"{", b"[]", b'{"schema_version": 999}'])
+def test_loader_wraps_malformed_protocol_as_domain_error(tmp_path: Path, content: bytes) -> None:
+    path = tmp_path / "bad.json"
+    path.write_bytes(content)
+    with pytest.raises(Verified10ProtocolError) as info:
+        load_verified10_protocol(path)
+    assert info.value.__cause__ is None
+
+
+def test_loader_wraps_missing_and_directory_as_domain_error(tmp_path: Path) -> None:
+    with pytest.raises(Verified10ProtocolError):
+        load_verified10_protocol(tmp_path / "missing.json")
+    directory = tmp_path / "protocol.json"
+    directory.mkdir()
+    with pytest.raises(Verified10ProtocolError):
+        load_verified10_protocol(directory)

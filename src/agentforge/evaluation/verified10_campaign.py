@@ -6,14 +6,21 @@ does not run an agent, call a model, generate predictions, or score a patch.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal, Self, cast
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
+
+from agentforge.evaluation.protocol import canonical_digest
 
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 GIT_COMMIT_PATTERN = r"^[0-9a-f]{40}$"
@@ -25,65 +32,9 @@ FORBIDDEN_GENERATION_FIELDS = (
     "patch",
     "test_patch",
 )
-EXPECTED_INSTANCE_IDS = (
-    "scikit-learn__scikit-learn-13142",
-    "django__django-12419",
-    "django__django-13212",
-    "scikit-learn__scikit-learn-13496",
-    "django__django-13343",
-    "matplotlib__matplotlib-24026",
-    "django__django-12050",
-    "pytest-dev__pytest-7571",
-    "sympy__sympy-16886",
-    "pylint-dev__pylint-8898",
-)
-ATTEMPT_STATUS_VALUES = ("PLANNED", "RUNNING", "COMPLETED", "FAILED")
 PUBLIC_ROW_FIELDS = frozenset(
     {"instance_id", "repo", "base_commit", "problem_statement"}
 )
-
-_TASK_METADATA: dict[str, tuple[str, str]] = {
-    "scikit-learn__scikit-learn-13142": (
-        "scikit-learn/scikit-learn",
-        "1c8668b0a021832386470ddf740d834e02c66f69",
-    ),
-    "django__django-12419": (
-        "django/django",
-        "7fa1a93c6c8109010a6ff3f604fda83b604e0e97",
-    ),
-    "django__django-13212": (
-        "django/django",
-        "f4e93919e4608cfc50849a1f764fd856e0917401",
-    ),
-    "scikit-learn__scikit-learn-13496": (
-        "scikit-learn/scikit-learn",
-        "3aefc834dce72e850bff48689bea3c7dff5f3fad",
-    ),
-    "django__django-13343": (
-        "django/django",
-        "ece18207cbb64dd89014e279ac636a6c9829828e",
-    ),
-    "matplotlib__matplotlib-24026": (
-        "matplotlib/matplotlib",
-        "14c96b510ebeba40f573e512299b1976f35b620e",
-    ),
-    "django__django-12050": (
-        "django/django",
-        "b93a0e34d9b9b99d41103782b7e7aeabf47517e3",
-    ),
-    "pytest-dev__pytest-7571": (
-        "pytest-dev/pytest",
-        "422685d0bdc110547535036c1ff398b5e1c44145",
-    ),
-    "sympy__sympy-16886": (
-        "sympy/sympy",
-        "c50643a49811e9fe2f4851adff4313ad46f7325e",
-    ),
-    "pylint-dev__pylint-8898": (
-        "pylint-dev/pylint",
-        "1f8c4d9eb185c16a2c1d881c054f015e1c2eb334",
-    ),
-}
 
 _FROZEN_TASK_BINDINGS = (
     (
@@ -157,6 +108,7 @@ _FROZEN_TASK_BINDINGS = (
         "055f83fc61e4e97be328dcdc7c34eb09bbe2981fe1a69e51a97702e50be10b3d",
     ),
 )
+EXPECTED_INSTANCE_IDS = tuple(binding[1] for binding in _FROZEN_TASK_BINDINGS)
 
 _FROZEN_DATASET_FINGERPRINT = "1fdfd21ba2621130"
 _FROZEN_SOURCE_SELECTION_SHA256 = (
@@ -171,7 +123,7 @@ _SWE_AGENT_MODELS_URL = (
 )
 _OPENHANDS_CONFIG_URL = "https://github.com/OpenHands/OpenHands/blob/main/config.template.toml"
 _FROZEN_PRIOR_ARTIFACT_HASHES = {
-    "selection_sha256": "9c385f13580c05e3cb5590e2abb43b278fa8ed99597315d7010f6953785ca9c0",
+    "selection_sha256": _FROZEN_SOURCE_SELECTION_SHA256,
     "experiment_protocol_sha256": (
         "b511f1c6c7974f7b36ed1eb4ba9ee7435a6dcf21211b7ed5e879fe9fcc06c62a"
     ),
@@ -188,20 +140,6 @@ _FROZEN_PRIOR_ARTIFACT_HASHES = {
         "9d6274d5ad446dde3cf000276466da8a00bd0203e01fffdc8ebe7a7a0ca48c9f"
     ),
 }
-
-
-def canonical_digest(value: object) -> str:
-    """Return the protocol's stable SHA256 encoding for JSON-compatible values."""
-
-    if isinstance(value, BaseModel):
-        value = value.model_dump(mode="json")
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def public_task_sha256(
@@ -229,6 +167,9 @@ class AttemptStatus(StrEnum):
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+
+
+ATTEMPT_STATUS_VALUES = tuple(item.value for item in AttemptStatus)
 
 
 class _FrozenModel(BaseModel):
@@ -413,6 +354,10 @@ class BenchmarkAttemptRecord(_FrozenModel):
     status: AttemptStatus
 
 
+class Verified10ProtocolError(ValueError):
+    """Stable domain error for every protocol loading failure."""
+
+
 def project_public_task(row: Mapping[str, object]) -> dict[str, str]:
     """Project a dataset row to exactly the public fields allowed for generation."""
 
@@ -433,6 +378,22 @@ def project_public_task(row: Mapping[str, object]) -> dict[str, str]:
     return projected
 
 
+def validate_public_task(
+    row: Mapping[str, object], task: Verified10Task
+) -> dict[str, str]:
+    """Validate one public runtime row against one frozen task binding."""
+
+    projected = project_public_task(row)
+    if projected["instance_id"] != task.instance_id:
+        raise ValueError("runtime dataset instance does not match selection")
+    if projected["repo"] != task.repo or projected["base_commit"] != task.base_commit:
+        raise ValueError(f"runtime dataset repo/base mismatch for {task.instance_id}")
+    actual_hash = public_task_sha256(**projected)
+    if actual_hash != task.public_task_sha256:
+        raise ValueError(f"public task hash mismatch for {task.instance_id}")
+    return projected
+
+
 def validate_public_dataset_rows(
     rows: Sequence[Mapping[str, object]], protocol: Verified10Protocol
 ) -> tuple[dict[str, str], ...]:
@@ -442,20 +403,15 @@ def validate_public_dataset_rows(
         raise ValueError("runtime dataset must contain exactly ten rows")
     projected_rows: list[dict[str, str]] = []
     for row, task in zip(rows, protocol.tasks, strict=True):
-        projected = project_public_task(row)
-        if projected["instance_id"] != task.instance_id:
-            raise ValueError("runtime dataset instance order does not match selection")
-        if projected["repo"] != task.repo or projected["base_commit"] != task.base_commit:
-            raise ValueError(f"runtime dataset repo/base mismatch for {task.instance_id}")
-        actual_hash = public_task_sha256(**projected)
-        if actual_hash != task.public_task_sha256:
-            raise ValueError(f"public task hash mismatch for {task.instance_id}")
-        projected_rows.append(projected)
+        projected_rows.append(validate_public_task(row, task))
     return tuple(projected_rows)
 
 
 def load_verified10_protocol(path: str | Path) -> Verified10Protocol:
     """Load and validate the JSON protocol artifact."""
 
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    return Verified10Protocol.model_validate(cast(dict[str, object], payload))
+    try:
+        resolved = Path(path).expanduser().resolve(strict=True)
+        return Verified10Protocol.model_validate_json(resolved.read_bytes())
+    except (OSError, UnicodeError, ValueError, ValidationError):
+        raise Verified10ProtocolError("Unable to load Verified-10 protocol") from None
