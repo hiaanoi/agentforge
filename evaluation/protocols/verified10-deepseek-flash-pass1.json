@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "protocol_name": "verified10-deepseek-flash-pass1",
+  "dataset_name": "princeton-nlp/SWE-bench_Verified",
+  "dataset_split": "test",
+  "dataset_fingerprint": "1fdfd21ba2621130",
+  "source_selection_sha256": "9c385f13580c05e3cb5590e2abb43b278fa8ed99597315d7010f6953785ca9c0",
+  "swebench_commit": "4e6126978a16bdfebc6538db8f28cacc2c8b77dc",
+  "mini_swe_agent_commit": "25941c89cfbc91eb40b3f8756348c91d9977d57e",
+  "mini_swe_agent_version": "2.4.6",
+  "attempts_per_instance": 1,
+  "model": "deepseek-v4-flash",
+  "thinking_enabled": false,
+  "temperature": 0.0,
+  "tasks": [
+    {
+      "selection_rank": "0021a6cc0b3f00fa98c226473304f8a8c77e3563f412f8a00caa393f291cd909",
+      "instance_id": "scikit-learn__scikit-learn-13142",
+      "repo": "scikit-learn/scikit-learn",
+      "base_commit": "1c8668b0a021832386470ddf740d834e02c66f69",
+      "public_task_sha256": "9f06307581ce7500feef1f13a0787b8a6cae79148b74cc4f8be359fc19121cf6"
+    },
+    {
+      "selection_rank": "0034bdf3cf80162dc8ac1db996043c25ae04242fd47d7fd55f12c8f9812fd66c",
+      "instance_id": "django__django-12419",
+      "repo": "django/django",
+      "base_commit": "7fa1a93c6c8109010a6ff3f604fda83b604e0e97",
+      "public_task_sha256": "25f3f330f1d759f32e075a9044e65b2b4f6bf511dab97c524a87fdac5f742a24"
+    },
+    {
+      "selection_rank": "012581344961f487b90d5363574659a3c90b03cac716d705f755861e6b887a0b",
+      "instance_id": "django__django-13212",
+      "repo": "django/django",
+      "base_commit": "f4e93919e4608cfc50849a1f764fd856e0917401",
+      "public_task_sha256": "25efae42f34a4b48cde1f0c6baabc8e7bf2727c9f66dede2bcc02279cdd447f8"
+    },
+    {
+      "selection_rank": "016bdfacb0eaae6e9eb824ee8ebe4d412fc056c8a37de97204d4e77042f4c3b1",
+      "instance_id": "scikit-learn__scikit-learn-13496",
+      "repo": "scikit-learn/scikit-learn",
+      "base_commit": "3aefc834dce72e850bff48689bea3c7dff5f3fad",
+      "public_task_sha256": "eaa512bc8bef6ad4d5bb745ba320447bf0878eecfa8015fbed2287b3eb2b243b"
+    },
+    {
+      "selection_rank": "03b8a5895ff385c7f718202f58f8388d51a7c128da6f1cf2355bef27ae54178d",
+      "instance_id": "django__django-13343",
+      "repo": "django/django",
+      "base_commit": "ece18207cbb64dd89014e279ac636a6c9829828e",
+      "public_task_sha256": "53284d1ec9f445c5929f03c62c97153caf40d44c2157eb433d453272b1027bae"
+    },
+    {
+      "selection_rank": "048c279800db517bd66ee630d35a280253f03dcd534e23e69b7cd4a3576cb962",
+      "instance_id": "matplotlib__matplotlib-24026",
+      "repo": "matplotlib/matplotlib",
+      "base_commit": "14c96b510ebeba40f573e512299b1976f35b620e",
+      "public_task_sha256": "5f16b267c474e37aab014af334324d450743eaff39744a37cbb3155d88005fdd"
+    },
+    {
+      "selection_rank": "04fefb9bb4515de22f0b688db0b851178a895792cfc63e3aa263726b28292c64",
+      "instance_id": "django__django-12050",
+      "repo": "django/django",
+      "base_commit": "b93a0e34d9b9b99d41103782b7e7aeabf47517e3",
+      "public_task_sha256": "bcd5d62508d55f0a1b62da171623297b5205c3878b4d8bca2b9cb11bf0d1052a"
+    },
+    {
+      "selection_rank": "053c82003c4072f9c4a9d24a20f1943402c9b16ae7dc42f44868bd770e6fb16d",
+      "instance_id": "pytest-dev__pytest-7571",
+      "repo": "pytest-dev/pytest",
+      "base_commit": "422685d0bdc110547535036c1ff398b5e1c44145",
+      "public_task_sha256": "b495b461821edfedf6c31666490d7f3c89a4cef0f7e4075d8f3d5575dd097434"
+    },
+    {
+      "selection_rank": "055bb685b4111ed49e1b46fbd4c16b547238db38dcfe461c9af75adc2d0ec8e1",
+      "instance_id": "sympy__sympy-16886",
+      "repo": "sympy/sympy",
+      "base_commit": "c50643a49811e9fe2f4851adff4313ad46f7325e",
+      "public_task_sha256": "5bcf752353d75ecbdbee43dbe44c6e70d64a7e32cf13327a9a47d5e0933b1ec7"
+    },
+    {
+      "selection_rank": "057a3a83545da946ace7c672d5c5428d9d651a81d3c8deeb534b87f4a77bb4dd",
+      "instance_id": "pylint-dev__pylint-8898",
+      "repo": "pylint-dev/pylint",
+      "base_commit": "1f8c4d9eb185c16a2c1d881c054f015e1c2eb334",
+      "public_task_sha256": "055f83fc61e4e97be328dcdc7c34eb09bbe2981fe1a69e51a97702e50be10b3d"
+    }
+  ],
+  "generation_forbidden_fields": [
+    "FAIL_TO_PASS",
+    "PASS_TO_PASS",
+    "hints",
+    "hints_text",
+    "patch",
+    "test_patch"
+  ],
+  "agentforge_budget": {
+    "repair_profile": "SWE_BENCH_PASS1",
+    "logical_model_calls": 50,
+    "run_steps": 80,
+    "wall_time_seconds": 1800,
+    "provider_max_model_requests": 52,
+    "provider_max_retries": 2,
+    "provider_max_output_tokens": 4096,
+    "provider_timeout_ms": 600000
+  },
+  "mini_budget": {
+    "step_limit": 50,
+    "wall_time_seconds": 1800,
+    "attempts": 1,
+    "temperature": 0.0,
+    "network": "none",
+    "cost_limit_usd": 0.0
+  },
+  "budget_rationale": [
+    {
+      "benchmark": "mini-swe-agent",
+      "source_url": "https://github.com/SWE-agent/mini-swe-agent/blob/main/src/minisweagent/config/benchmarks/swebench.yaml",
+      "value": 250,
+      "unit": "steps",
+      "note": "Official mini-SWE-agent SWE-bench configuration value."
+    },
+    {
+      "benchmark": "mini-swe-agent",
+      "source_url": "https://github.com/SWE-agent/mini-swe-agent/blob/main/src/minisweagent/config/benchmarks/swebench.yaml",
+      "value": 3,
+      "unit": "usd",
+      "note": "Official mini-SWE-agent SWE-bench configuration value."
+    },
+    {
+      "benchmark": "SWE-agent",
+      "source_url": "https://github.com/princeton-nlp/SWE-agent/blob/main/sweagent/agent/models.py",
+      "value": 3,
+      "unit": "usd",
+      "note": "Official SWE-agent model budget value."
+    },
+    {
+      "benchmark": "OpenHands",
+      "source_url": "https://github.com/OpenHands/OpenHands/blob/main/config.template.toml",
+      "value": 500,
+      "unit": "iterations",
+      "note": "Official OpenHands iteration limit value."
+    }
+  ],
+  "budget_rationale_note": "Units differ across tools; these values are not a cost-normalized comparison.",
+  "prior_baseline": {
+    "logical_model_calls": 14,
+    "mini_resolved": 1,
+    "agentforge_resolved": 0,
+    "agentforge_admission": 4,
+    "compatibility_failures": 6,
+    "artifacts": {
+      "selection_sha256": "9c385f13580c05e3cb5590e2abb43b278fa8ed99597315d7010f6953785ca9c0",
+      "experiment_protocol_sha256": "b511f1c6c7974f7b36ed1eb4ba9ee7435a6dcf21211b7ed5e879fe9fcc06c62a",
+      "agentforge_predictions_sha256": "2e98e29e37f5c42598fe055c1db5972a44bec9d5d68ad3721cf9e00c40efaf48",
+      "mini_swe_agent_predictions_sha256": "42fcc0377abdb3538a12ea814a862b9ddd46dfb69fef544058a817134373e1fb",
+      "agentforge_official_report_sha256": "a9c19d540f1170d9026161c4bdf997c1b487bd000208f3fe8b2044b5ddea0243",
+      "mini_swe_agent_official_report_sha256": "9d6274d5ad446dde3cf000276466da8a00bd0203e01fffdc8ebe7a7a0ca48c9f"
+    },
+    "output_adoption": "metadata_only_do_not_adopt_old_outputs"
+  }
+}
