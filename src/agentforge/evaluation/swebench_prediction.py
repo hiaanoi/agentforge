@@ -205,6 +205,27 @@ def save_swebench_predictions(
     (or a protocol exposing ``tasks``) supplies the denominator and ordering.
     """
 
+    target = path.resolve(strict=False)
+    payload = serialize_swebench_predictions(
+        predictions,
+        expected_instance_ids=expected_instance_ids,
+        protocol=protocol,
+    )
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write(target, payload, target.with_name(f".{target.name}.tmp"))
+    except OSError as exc:
+        raise SWEbenchPredictionError("SWE-bench predictions could not be saved") from exc
+
+
+def serialize_swebench_predictions(
+    predictions: list[SWEbenchPrediction] | tuple[SWEbenchPrediction, ...],
+    *,
+    expected_instance_ids: tuple[str, ...] | list[str] | None = None,
+    protocol: object | None = None,
+) -> bytes:
+    """Serialize the official prediction array without touching the filesystem."""
+
     if expected_instance_ids is not None and protocol is not None:
         raise SWEbenchPredictionError("Specify expected_instance_ids or protocol, not both")
     if protocol is not None:
@@ -225,9 +246,7 @@ def save_swebench_predictions(
     by_instance = {prediction.instance_id: prediction for prediction in predictions}
     records = [by_instance[instance_id].harness_record() for instance_id in expected]
     payload = json.dumps(records, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
-    target = path.resolve(strict=False)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    _atomic_write(target, (payload + "\n").encode("utf-8"), target.with_name(f".{target.name}.tmp"))
+    return (payload + "\n").encode("utf-8")
 
 
 def load_swebench_predictions(path: str | Path) -> tuple[dict[str, str], ...]:

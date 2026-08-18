@@ -304,6 +304,41 @@ def test_finalizer_exports_ten_public_rows_and_private_ledger(tmp_path: Path) ->
     assert result.ledger_sha256 == hashlib.sha256((tmp_path / "ledger.json").read_bytes()).hexdigest()
 
 
+def test_finalizer_preflights_ledger_parent_before_public_publish(tmp_path: Path) -> None:
+    protocol = load_verified10_protocol(PROTOCOL_PATH)
+    predictions = []
+    attempts = []
+    for task in protocol.tasks:
+        binding = SWEbenchInstanceBinding(
+            instance_id=task.instance_id, repo=task.repo, base_commit=task.base_commit
+        )
+        prediction = SWEbenchPrediction.empty(binding, protocol.model)
+        predictions.append(prediction)
+        attempts.append(
+            BenchmarkAttemptRecord(
+                protocol_sha256=protocol.protocol_sha256,
+                arm=BenchmarkArm.AGENTFORGE,
+                instance_id=task.instance_id,
+                attempt_index=1,
+                status=AttemptStatus.FAILED,
+                prediction_patch_sha256=prediction.patch_sha256,
+            )
+        )
+    blocked_parent = tmp_path / "blocked-parent"
+    blocked_parent.write_text("not a directory", encoding="utf-8")
+    public_path = tmp_path / "public.json"
+    with pytest.raises(CampaignArtifactError):
+        finalize_verified10_campaign(
+            protocol,
+            attempts,
+            predictions,
+            public_path,
+            blocked_parent / "ledger.json",
+        )
+    assert not public_path.exists()
+    assert not public_path.with_name(f".{public_path.name}.tmp").exists()
+
+
 def test_finalizer_rejects_wrong_prediction_checkout_and_model_identity(tmp_path: Path) -> None:
     protocol = load_verified10_protocol(PROTOCOL_PATH)
     predictions = []

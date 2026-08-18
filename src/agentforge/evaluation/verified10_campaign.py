@@ -27,7 +27,7 @@ from agentforge.evaluation.protocol import canonical_digest
 from agentforge.evaluation.swebench_prediction import (
     SWEbenchPrediction,
     SWEbenchPredictionError,
-    save_swebench_predictions,
+    serialize_swebench_predictions,
 )
 
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
@@ -414,15 +414,13 @@ class CampaignArtifactResult(_FrozenModel):
 def save_attempt_ledger(path: str | Path, attempts: Sequence[BenchmarkAttemptRecord]) -> str:
     """Atomically save the private attempt ledger and return its written-byte digest."""
 
-    target = Path(path).expanduser().resolve(strict=False)
-    payload = json.dumps(
-        [record.model_dump(mode="json") for record in attempts],
-        ensure_ascii=True,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8") + b"\n"
+    target = _prepare_artifact_target(path)
+    payload = _serialize_attempt_ledger(attempts)
     _atomic_artifact_write(target, payload)
-    return hashlib.sha256(target.read_bytes()).hexdigest()
+    try:
+        return hashlib.sha256(target.read_bytes()).hexdigest()
+    except OSError:
+        raise CampaignArtifactError("Unable to save campaign artifact") from None
 
 
 def load_attempt_ledger(path: str | Path) -> tuple[BenchmarkAttemptRecord, ...]:
@@ -502,15 +500,22 @@ def finalize_verified10_campaign(
         ):
             raise CampaignArtifactError("Completed empty prediction has an invalid failure class")
     try:
-        save_swebench_predictions(
-            Path(prediction_path),
-            tuple(by_prediction.values()),
-            expected_instance_ids=expected_ids,
+        # Serialization and parent readiness happen before either artifact is published.
+        prediction_payload = serialize_swebench_predictions(
+            tuple(by_prediction.values()), expected_instance_ids=expected_ids
         )
-    except (OSError, SWEbenchPredictionError):
-        raise CampaignArtifactError("Unable to save campaign predictions") from None
-    ledger_digest = save_attempt_ledger(ledger_path, attempts)
-    prediction_digest = hashlib.sha256(Path(prediction_path).read_bytes()).hexdigest()
+        ledger_payload = _serialize_attempt_ledger(attempts)
+        prediction_target = _prepare_artifact_target(prediction_path)
+        ledger_target = _prepare_artifact_target(ledger_path)
+        # Files are not a transaction: the public prediction is the final commit marker.
+        _atomic_artifact_write(ledger_target, ledger_payload)
+        _atomic_artifact_write(prediction_target, prediction_payload)
+        prediction_digest = hashlib.sha256(prediction_target.read_bytes()).hexdigest()
+        ledger_digest = hashlib.sha256(ledger_target.read_bytes()).hexdigest()
+    except CampaignArtifactError:
+        raise
+    except (OSError, SWEbenchPredictionError, TypeError, ValueError):
+        raise CampaignArtifactError("Unable to finalize campaign artifacts") from None
     return CampaignArtifactResult(
         predictions_sha256=prediction_digest,
         ledger_sha256=ledger_digest,
@@ -518,7 +523,6 @@ def finalize_verified10_campaign(
 
 
 def _atomic_artifact_write(target: Path, payload: bytes) -> None:
-    target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f".{target.name}.tmp")
     try:
         with temporary.open("wb") as stream:
@@ -532,6 +536,32 @@ def _atomic_artifact_write(target: Path, payload: bytes) -> None:
         except OSError:
             pass
         raise CampaignArtifactError("Unable to save campaign artifact") from None
+
+
+def _serialize_attempt_ledger(attempts: Sequence[BenchmarkAttemptRecord]) -> bytes:
+    try:
+        return (
+            json.dumps(
+                [record.model_dump(mode="json") for record in attempts],
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            + b"\n"
+        )
+    except (TypeError, ValueError):
+        raise CampaignArtifactError("Unable to serialize campaign ledger") from None
+
+
+def _prepare_artifact_target(path: str | Path) -> Path:
+    try:
+        target = Path(path).expanduser().resolve(strict=False)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.parent.is_dir() or (target.exists() and target.is_dir()):
+            raise OSError
+        return target
+    except (OSError, RuntimeError, ValueError):
+        raise CampaignArtifactError("Unable to prepare campaign artifact path") from None
 
 
 def project_public_task(row: Mapping[str, object]) -> dict[str, str]:
