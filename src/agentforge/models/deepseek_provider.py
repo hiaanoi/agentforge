@@ -84,6 +84,8 @@ class DeepSeekModelProvider:
             "n": 1,
             "extra_body": {"thinking": {"type": "disabled"}},
         }
+        if self._config.temperature is not None:
+            kwargs["temperature"] = self._config.temperature
         if request.tools:
             kwargs["tools"] = [convert_tool_spec(spec) for spec in request.tools]
         if self._config.max_output_tokens is not None:

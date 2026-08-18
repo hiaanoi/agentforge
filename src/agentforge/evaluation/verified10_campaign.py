@@ -187,6 +187,7 @@ class AttemptFailureClass(StrEnum):
     MODEL_FAILED = "MODEL_FAILED"
     MODEL = "MODEL_FAILED"
     POLICY_FAILED = "POLICY_FAILED"
+    PROTOCOL_FAILED = "PROTOCOL_FAILED"
     RUNTIME_FAILED = "RUNTIME_FAILED"
     INFRASTRUCTURE_FAILED = "INFRASTRUCTURE_FAILED"
     INTERRUPTED = "INTERRUPTED"
@@ -545,10 +546,12 @@ def finalize_verified10_campaign(
             raise CampaignArtifactError("Prediction patch digest does not match attempt ledger")
         if prediction.model_patch:
             if (
-                record.status is not AttemptStatus.COMPLETED
-                or record.failure_class is not AttemptFailureClass.NONE
+                record.status is AttemptStatus.COMPLETED
+                and record.failure_class is not AttemptFailureClass.NONE
             ):
-                raise CampaignArtifactError("Non-empty prediction must be a completed attempt")
+                raise CampaignArtifactError(
+                    "Completed non-empty prediction has an invalid failure class"
+                )
         elif (
             record.status is AttemptStatus.COMPLETED
             and record.failure_class is not AttemptFailureClass.EMPTY

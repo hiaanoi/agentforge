@@ -357,8 +357,8 @@ def test_finalizer_exports_ten_public_rows_and_private_ledger(tmp_path: Path) ->
                 base_commit=task.base_commit,
                 patch_sha256=hashlib.sha256(patch.encode()).hexdigest(),
             )
-            status = AttemptStatus.COMPLETED
-            failure_class = AttemptFailureClass.NONE
+            status = AttemptStatus.FAILED
+            failure_class = AttemptFailureClass.TIMEOUT
             patch_hash = prediction.patch_sha256
         else:
             prediction = SWEbenchPrediction.empty(binding, model_identity)
@@ -809,4 +809,5 @@ def test_generated_agentforge_files_pass_product_loaders_without_secrets(
         "max_total_tokens": 600000,
     }
     assert "api_key" not in (config_text + runtime_text).casefold()
-    assert "temperature" not in runtime_text.casefold()
+    assert "timeout_seconds = 600.0" in runtime_text
+    assert "temperature = 0.0" in runtime_text

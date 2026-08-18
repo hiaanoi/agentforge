@@ -99,6 +99,7 @@ class ModelProviderConfig(BaseModel):
     api_key: SecretStr = Field(exclude=True, repr=False)
     model: str = Field(min_length=1)
     timeout_seconds: float = Field(default=30.0, gt=0)
+    temperature: float | None = Field(default=None, ge=0.0, le=0.0)
     max_retries: int = Field(default=2, ge=0, le=10)
     store: Literal[False] = False
     max_output_tokens: int | None = Field(default=None, gt=0)

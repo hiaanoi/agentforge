@@ -33,10 +33,11 @@ from agentforge.evaluation.verified10_campaign import (
     Verified10Task,
     finalize_verified10_campaign,
     load_verified10_protocol,
+    validate_public_task,
 )
 from agentforge.evaluation.verified10_support import (
+    _TERMINAL_RETURN_CODES,
     _UUID_PATTERN,
-    APPROVAL_REQUIRED,
     CampaignAttempt,
     CampaignCommand,
     CampaignCommandResult,
@@ -84,6 +85,8 @@ class Verified10Campaign:
     @staticmethod
     def _safe_root(requested: Path) -> Path:
         absolute = requested.absolute()
+        if absolute == Path(absolute.anchor):
+            raise CampaignExecutionError("Output directory cannot be a filesystem root")
         current = Path(absolute.anchor)
         try:
             for part in absolute.parts[1:]:
@@ -111,13 +114,12 @@ class Verified10Campaign:
 
     def _bootstrap_or_load(self) -> CampaignState:
         try:
-            self.root.mkdir(parents=True, exist_ok=True)
-            if self._state_path.exists():
-                return self._load()
+            if self.root.exists() or self.root.is_symlink():
+                raise CampaignExecutionError("New campaign output directory must not exist")
+            self.root.parent.mkdir(parents=True, exist_ok=True)
+            self.root.mkdir(exist_ok=False)
             descriptor = self._acquire_lock()
             try:
-                if self._state_path.exists():
-                    return self._load_unlocked()
                 self._atomic(self.root / "protocol.json", self.protocol_path.read_bytes())
                 state = CampaignState(protocol_digest=self.protocol.protocol_digest)
                 self._write_state_unlocked(state)
@@ -158,6 +160,22 @@ class Verified10Campaign:
             or state.protocol_digest != self.protocol.protocol_digest
         ):
             raise CampaignExecutionError("Campaign protocol digest mismatch")
+        if state.prepared:
+            if tuple(state.public_tasks) != tuple(task.instance_id for task in self.protocol.tasks):
+                raise CampaignExecutionError("Campaign public task order is invalid")
+            try:
+                for task in self.protocol.tasks:
+                    validate_public_task(
+                        {
+                            "instance_id": task.instance_id,
+                            "repo": task.repo,
+                            "base_commit": task.base_commit,
+                            "problem_statement": state.public_tasks[task.instance_id],
+                        },
+                        task,
+                    )
+            except (KeyError, TypeError, ValueError):
+                raise CampaignExecutionError("Campaign public task binding is invalid") from None
         for workspace_record in state.workspaces.values():
             _resolve_under_root(self.root, workspace_record.path)
         for records in state.attempts.values():
@@ -265,14 +283,23 @@ class Verified10Campaign:
         bindings: dict[str, DockerImageBinding] = {}
         for task in self.protocol.tasks:
             tag = swebench_image_name(task.instance_id)
-            bindings[task.instance_id] = self._inspect_image(tag, pull_if_missing=True)
+            self._run(
+                CampaignCommand(("docker", "pull", tag), timeout_seconds=1800),
+                label="docker pull",
+            )
+            bindings[task.instance_id] = self._inspect_image(tag, pull_if_missing=False)
         for arm in BenchmarkArm:
             for task in self.protocol.tasks:
                 binding = bindings[task.instance_id]
                 workspace = self.root / "workspaces" / arm.value.lower() / task.instance_id
                 if workspace.exists() or workspace.is_symlink():
                     raise CampaignExecutionError("Materialized workspace already exists")
-                workspace.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    workspace.parent.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    raise CampaignExecutionError(
+                        "Workspace admission path is unavailable"
+                    ) from None
                 created = self._run(
                     CampaignCommand(("docker", "create", binding.digest_reference)),
                     label="docker create",
@@ -292,7 +319,10 @@ class Verified10Campaign:
                 head = self._git_head(workspace)
                 if head != task.base_commit:
                     raise CampaignExecutionError("Materialized workspace base commit mismatch")
-                capture = self._capture_workspace(workspace, task.instance_id)
+                try:
+                    capture = self._capture_workspace(workspace, task.instance_id)
+                except (OSError, TypeError, ValueError, RuntimeError):
+                    raise CampaignExecutionError("Workspace admission validation failed") from None
                 records[f"{arm.value}:{task.instance_id}"] = WorkspaceRecord(
                     path=_relative(self.root, workspace),
                     image_tag=binding.tag,
@@ -399,6 +429,8 @@ class Verified10Campaign:
         recover_running: bool = False,
         retry_failed: bool = False,
     ) -> None:
+        state = self._load()
+        self._require_prepared(state)
         root = Path(mini_root).absolute()
         self.mini_source_verifier.verify(root)
         self._run_arm(
@@ -443,7 +475,12 @@ class Verified10Campaign:
                         ),
                     )
                     continue
-                attempt = self._recover_agentforge(task, state, existing)
+                try:
+                    attempt = self._recover_agentforge(task, state, existing)
+                except CampaignExecutionError as exc:
+                    attempt = self._preserve_failed_agentforge(
+                        task, existing, str(exc), time.monotonic()
+                    )
                 self._store_attempt(arm, attempt)
                 continue
             running = CampaignAttempt(
@@ -456,15 +493,23 @@ class Verified10Campaign:
             try:
                 attempt = self._execute_attempt(arm, task, self._load(), mini_root, started)
             except CampaignExecutionError as exc:
-                attempt = CampaignAttempt(
-                    instance_id=task.instance_id,
-                    attempt_index=1,
-                    status=AttemptStatus.FAILED,
-                    failure_class=self._classify_failure(str(exc)),
-                    terminal_reason=str(exc),
-                    wall_time_seconds=max(0.0, time.monotonic() - started),
-                    telemetry_unavailable=("model_usage", "repair_counters", "events"),
-                )
+                durable = self._records(self._load(), arm).get(task.instance_id)
+                if (
+                    arm is BenchmarkArm.AGENTFORGE
+                    and durable is not None
+                    and durable.run_id is not None
+                ):
+                    attempt = self._preserve_failed_agentforge(task, durable, str(exc), started)
+                else:
+                    attempt = CampaignAttempt(
+                        instance_id=task.instance_id,
+                        attempt_index=1,
+                        status=AttemptStatus.FAILED,
+                        failure_class=self._classify_failure(str(exc)),
+                        terminal_reason=str(exc),
+                        wall_time_seconds=max(0.0, time.monotonic() - started),
+                        telemetry_unavailable=("model_usage", "repair_counters", "events"),
+                    )
             self._store_attempt(arm, attempt)
 
     @staticmethod
@@ -488,13 +533,12 @@ class Verified10Campaign:
         mini_root: Path | None,
         started: float,
     ) -> CampaignAttempt:
-        workspace = _resolve_under_root(
-            self.root, state.workspaces[f"{arm.value}:{task.instance_id}"].path
-        )
+        workspace_record = state.workspaces[f"{arm.value}:{task.instance_id}"]
+        workspace = _resolve_under_root(self.root, workspace_record.path)
         if arm is BenchmarkArm.MINI_SWE_AGENT:
             if mini_root is None:
                 raise CampaignExecutionError("mini root is required")
-            return self._execute_mini(task, mini_root, started)
+            return self._execute_mini(task, mini_root, workspace_record, started)
         return self._execute_agentforge(
             task, workspace, state.public_tasks[task.instance_id], started
         )
@@ -502,7 +546,11 @@ class Verified10Campaign:
     _mini_config = staticmethod(mini_config)
 
     def _execute_mini(
-        self, task: Verified10Task, mini_root: Path, started: float
+        self,
+        task: Verified10Task,
+        mini_root: Path,
+        workspace_record: WorkspaceRecord,
+        started: float,
     ) -> CampaignAttempt:
         secret = os.environ.get("DEEPSEEK_API_KEY")
         if not secret:
@@ -548,7 +596,17 @@ class Verified10Campaign:
         )
         result = self._run(command, label="mini")
         trajectory = output / task.instance_id / f"{task.instance_id}.traj.json"
-        return self._parse_mini_result(task, output, trajectory, result, started)
+        attempt = self._parse_mini_result(task, output, trajectory, result, started)
+        image = self._inspect_image(workspace_record.image_tag, pull_if_missing=False)
+        if image.digest_reference != workspace_record.image_digest:
+            return attempt.model_copy(
+                update={
+                    "status": AttemptStatus.FAILED,
+                    "failure_class": AttemptFailureClass.INFRASTRUCTURE_FAILED,
+                    "terminal_reason": "Prepared Docker image digest changed during mini run",
+                }
+            )
+        return attempt
 
     def _parse_mini_result(
         self,
@@ -558,24 +616,73 @@ class Verified10Campaign:
         result: CampaignCommandResult,
         started: float,
     ) -> CampaignAttempt:
+        result_failure: AttemptFailureClass | None = None
+        result_reason: str | None = None
+        patch = ""
         try:
             predictions = json.loads((output / "preds.json").read_text(encoding="utf-8"))
+            if not isinstance(predictions, dict) or set(predictions) != {task.instance_id}:
+                raise ValueError("predictions must contain exactly the expected instance")
             item = predictions[task.instance_id]
-            if not isinstance(item, dict) or item.get("instance_id") != task.instance_id:
-                raise ValueError
+            if not isinstance(item, dict) or set(item) != {
+                "model_name_or_path",
+                "instance_id",
+                "model_patch",
+            }:
+                raise ValueError("prediction record shape is invalid")
+            if item.get("instance_id") != task.instance_id:
+                raise ValueError("prediction instance does not match")
             patch = item["model_patch"]
-            if not isinstance(patch, str) or not isinstance(item.get("model_name_or_path"), str):
-                raise ValueError
+            if (
+                not isinstance(patch, str)
+                or item.get("model_name_or_path") != "openai/deepseek-v4-flash"
+            ):
+                raise ValueError("prediction model identity is invalid")
+        except FileNotFoundError:
+            result_failure = AttemptFailureClass.INFRASTRUCTURE_FAILED
+            result_reason = "mini predictions artifact is missing"
         except (OSError, UnicodeError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-            patch = ""
+            result_failure = AttemptFailureClass.PROTOCOL_FAILED
+            result_reason = "mini predictions artifact is malformed"
         info: Mapping[str, object] = {}
         try:
             decoded = json.loads(trajectory.read_text(encoding="utf-8"))
-            raw_info = decoded.get("info") if isinstance(decoded, dict) else None
-            if isinstance(raw_info, dict):
-                info = raw_info
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            pass
+            if not isinstance(decoded, dict) or decoded.get("instance_id") != task.instance_id:
+                raise ValueError("trajectory instance does not match")
+            raw_info = decoded.get("info")
+            messages = decoded.get("messages")
+            if not isinstance(raw_info, dict) or not isinstance(messages, list):
+                raise ValueError("trajectory shape is invalid")
+            user_contents = [
+                message.get("content")
+                for message in messages
+                if isinstance(message, dict) and message.get("role") == "user"
+            ]
+            if not user_contents or not isinstance(user_contents[0], str):
+                raise ValueError("trajectory user prompt is missing")
+            match = re.search(
+                r"Consider the following PR description:\n(.*?)\n</pr_description>",
+                user_contents[0],
+                re.DOTALL,
+            )
+            if match is None:
+                raise ValueError("trajectory public task prompt is malformed")
+            validate_public_task(
+                {
+                    "instance_id": task.instance_id,
+                    "repo": task.repo,
+                    "base_commit": task.base_commit,
+                    "problem_statement": match.group(1),
+                },
+                task,
+            )
+            info = raw_info
+        except FileNotFoundError:
+            result_failure = result_failure or AttemptFailureClass.INFRASTRUCTURE_FAILED
+            result_reason = result_reason or "mini trajectory artifact is missing"
+        except (OSError, UnicodeError, TypeError, ValueError, json.JSONDecodeError):
+            result_failure = AttemptFailureClass.PROTOCOL_FAILED
+            result_reason = "mini trajectory artifact is malformed or input binding drifted"
         exit_status = info.get("exit_status")
         stats = info.get("model_stats") if isinstance(info.get("model_stats"), dict) else {}
         assert isinstance(stats, dict)
@@ -584,7 +691,8 @@ class Verified10Campaign:
         completion = _first_int(stats, "completion_tokens", "output_tokens")
         total = _first_int(stats, "total_tokens")
         terminal_ok = (
-            result.returncode == 0
+            result_failure is None
+            and result.returncode == 0
             and isinstance(exit_status, str)
             and exit_status.casefold()
             in {
@@ -593,23 +701,29 @@ class Verified10Campaign:
                 "success",
             }
         )
-        failure = (
-            AttemptFailureClass.NONE
-            if terminal_ok and patch
-            else (
-                AttemptFailureClass.EMPTY
-                if terminal_ok
-                else self._classify_failure(str(exit_status or result.stderr))
+        if terminal_ok:
+            failure = AttemptFailureClass.NONE if patch else AttemptFailureClass.EMPTY
+        elif result_failure is not None:
+            failure = result_failure
+        elif result.returncode == 0 and isinstance(exit_status, str):
+            failure = (
+                AttemptFailureClass.TIMEOUT
+                if "timeout" in exit_status.casefold()
+                else AttemptFailureClass.MODEL_FAILED
             )
-        )
-        unavailable = tuple(
-            name
-            for name, value in (
-                ("provider_prompt_tokens", prompt),
-                ("provider_completion_tokens", completion),
-                ("provider_total_tokens", total),
-            )
-            if value is None
+        else:
+            failure = self._classify_failure(str(exit_status or result.stderr))
+        unavailable = (
+            "steps",
+            *(
+                name
+                for name, value in (
+                    ("provider_prompt_tokens", prompt),
+                    ("provider_completion_tokens", completion),
+                    ("provider_total_tokens", total),
+                )
+                if value is None
+            ),
         )
         return self._terminal_attempt(
             task.instance_id,
@@ -617,9 +731,8 @@ class Verified10Campaign:
             trajectory,
             status=AttemptStatus.COMPLETED if terminal_ok else AttemptStatus.FAILED,
             failure=failure,
-            reason=str(exit_status)
-            if exit_status is not None
-            else f"returncode={result.returncode}",
+            reason=result_reason
+            or (str(exit_status) if exit_status is not None else f"returncode={result.returncode}"),
             model_calls=model_calls,
             prompt_tokens=prompt,
             completion_tokens=completion,
@@ -721,7 +834,7 @@ class Verified10Campaign:
                     problem_statement,
                 ),
                 timeout_seconds=1800,
-                acceptable_returncodes=frozenset({0, APPROVAL_REQUIRED}),
+                acceptable_returncodes=_TERMINAL_RETURN_CODES,
             ),
             label="agentforge exec",
         )
@@ -758,6 +871,68 @@ class Verified10Campaign:
             task, workspace, existing.run_id, final, approvals, transcript, started
         )
 
+    def _preserve_failed_agentforge(
+        self,
+        task: Verified10Task,
+        existing: CampaignAttempt,
+        reason: str,
+        started: float,
+    ) -> CampaignAttempt:
+        assert existing.run_id is not None
+        state = self._load()
+        workspace = _resolve_under_root(
+            self.root,
+            state.workspaces[f"{BenchmarkArm.AGENTFORGE.value}:{task.instance_id}"].path,
+        )
+        transcript = reason + "\n"
+        for export in (False, True):
+            try:
+                inspected = self._inspect_run(workspace, existing.run_id, export=export)
+                transcript += inspected.stdout + inspected.stderr
+            except CampaignExecutionError:
+                transcript += "inspect_unavailable=true\n"
+        try:
+            patch = self._git_patch(workspace, task)
+        except CampaignExecutionError:
+            patch = ""
+        try:
+            telemetry = self._agentforge_telemetry(workspace, existing.run_id)
+        except Exception:
+            telemetry = {
+                "unavailable": (
+                    "run_lifecycle",
+                    "repair_counters",
+                    "model_usage",
+                    "approvals",
+                    "events",
+                )
+            }
+        trajectory = self.root / "trajectories" / "agentforge" / f"{task.instance_id}.log"
+        try:
+            self._atomic(trajectory, transcript.encode("utf-8", errors="replace"))
+        except CampaignExecutionError:
+            pass
+        return self._terminal_attempt(
+            task.instance_id,
+            patch,
+            trajectory,
+            status=AttemptStatus.FAILED,
+            failure=self._classify_failure(reason),
+            reason=str(telemetry.get("terminal_reason") or reason),
+            run_id=existing.run_id,
+            model_calls=_as_int(telemetry.get("model_calls")),
+            steps=_as_int(telemetry.get("steps")),
+            prompt_tokens=_as_int(telemetry.get("prompt_tokens")),
+            completion_tokens=_as_int(telemetry.get("completion_tokens")),
+            total_tokens=_as_int(telemetry.get("total_tokens")),
+            approval_count=_as_int(telemetry.get("approval_count")),
+            edit_count=_as_int(telemetry.get("edit_count")),
+            test_count=_as_int(telemetry.get("test_count")),
+            event_count=_as_int(telemetry.get("event_count")),
+            wall=max(0.0, time.monotonic() - started),
+            unavailable=_string_tuple(telemetry.get("unavailable")),
+        )
+
     def _drive_agentforge(
         self,
         workspace: Path,
@@ -774,7 +949,7 @@ class Verified10Campaign:
             inspection = self._inspect_run(workspace, run_id, export=False)
             transcript += inspection.stdout + inspection.stderr
             lifecycle = self._field(inspection.stdout, "lifecycle")
-            if lifecycle in {"COMPLETED", "FAILED", "CANCELLED"}:
+            if lifecycle == "TERMINAL":
                 return inspection, approval_count, transcript
             approvals = self._run(
                 CampaignCommand(
@@ -821,7 +996,7 @@ class Verified10Campaign:
                         run_id,
                     ),
                     timeout_seconds=max(1, 1800 - int(time.monotonic() - started)),
-                    acceptable_returncodes=frozenset({0, 1, APPROVAL_REQUIRED, 22}),
+                    acceptable_returncodes=_TERMINAL_RETURN_CODES,
                 ),
                 label="agentforge resume",
             )
@@ -860,14 +1035,18 @@ class Verified10Campaign:
         lifecycle = self._field(final.stdout, "lifecycle") or telemetry.get("lifecycle")
         outcome = self._field(final.stdout, "outcome") or telemetry.get("outcome")
         terminal_reason = telemetry.get("terminal_reason") or outcome or lifecycle or "UNKNOWN"
-        completed = lifecycle == "COMPLETED"
+        completed = lifecycle == "TERMINAL" and outcome in {"VERIFIED", "UNVERIFIED"}
         failure = (
             AttemptFailureClass.NONE
             if completed and patch
             else (
                 AttemptFailureClass.EMPTY
                 if completed
-                else self._classify_failure(str(terminal_reason))
+                else (
+                    AttemptFailureClass.RUNTIME_FAILED
+                    if outcome == "UNKNOWN"
+                    else self._classify_failure(str(terminal_reason))
+                )
             )
         )
         return self._terminal_attempt(
@@ -1027,10 +1206,13 @@ class Verified10Campaign:
                 "completed": 0,
                 "failed": 0,
                 "admission": state.admission_count,
+                "telemetry_unavailable": 0,
             }
             records = state.attempts.get(arm.value, ())
             for record in records:
                 counts[record.status.value.lower()] += 1
+                if record.telemetry_unavailable:
+                    counts["telemetry_unavailable"] += 1
             counts["planned"] = 10 - counts["running"] - counts["completed"] - counts["failed"]
             result[arm.value] = counts
         return result

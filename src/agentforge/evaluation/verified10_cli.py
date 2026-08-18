@@ -32,7 +32,11 @@ def build_parser() -> argparse.ArgumentParser:
         item.add_argument("--output-dir", required=True, type=Path)
         if name in {"run-agentforge", "run-mini"}:
             item.add_argument("--recover-running", action="store_true")
-            item.add_argument("--retry-failed", action="store_true")
+            item.add_argument(
+                "--retry-failed",
+                action="store_true",
+                help="rejected by this attempts=1 protocol; retained for explicit diagnostics",
+            )
         if name == "run-mini":
             item.add_argument(
                 "--mini-root", type=Path, default=os.environ.get("MINI_SWE_AGENT_ROOT")
@@ -57,6 +61,7 @@ def main(
         campaign = campaign_factory(args.protocol, args.output_dir)
         if args.command == "prepare":
             campaign.prepare()  # type: ignore[attr-defined]
+            print("admission=10/10")
         elif args.command == "run-agentforge":
             campaign.run_agentforge(  # type: ignore[attr-defined]
                 recover_running=args.recover_running, retry_failed=args.retry_failed

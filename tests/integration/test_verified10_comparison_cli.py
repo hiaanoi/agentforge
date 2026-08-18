@@ -102,10 +102,26 @@ class FakeRunner:
             )
             trajectory = output / task.instance_id
             trajectory.mkdir()
+            problem = next(
+                row["problem_statement"]
+                for row in public_rows()
+                if row["instance_id"] == task.instance_id
+            )
             (trajectory / f"{task.instance_id}.traj.json").write_text(
                 json.dumps(
                     {
+                        "instance_id": task.instance_id,
                         "info": {"model_stats": {"api_calls": 1}, "exit_status": "submitted"},
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": (
+                                    "<pr_description>\nConsider the following PR description:\n"
+                                    + problem
+                                    + "\n</pr_description>"
+                                ),
+                            }
+                        ],
                         "config": {"model": "openai/deepseek-v4-flash"},
                     }
                 ),
@@ -176,6 +192,12 @@ def test_prepare_then_mini_then_finalize_is_local_and_secret_free(
     assert first.environment is not None
     assert first.environment["OPENAI_API_KEY"] == "test-secret"
     creates = [command for command in runner.commands if command.argv[:2] == ("docker", "create")]
+    pulls = [command for command in runner.commands if command.argv[:2] == ("docker", "pull")]
+    inspections = [
+        command for command in runner.commands if command.argv[:3] == ("docker", "image", "inspect")
+    ]
+    assert len(pulls) == 10
+    assert len(inspections) == 30
     assert len(creates) == 20
     assert all(
         "@sha256:" in command.argv[-1] and not command.argv[-1].endswith(":latest")
@@ -183,6 +205,10 @@ def test_prepare_then_mini_then_finalize_is_local_and_secret_free(
     )
     assert all(
         record["status"] in {"COMPLETED", "FAILED"}
+        for record in state["attempts"][BenchmarkArm.MINI_SWE_AGENT.value]
+    )
+    assert all(
+        record["provider_capabilities"]["temperature_control"] == "BOUND"
         for record in state["attempts"][BenchmarkArm.MINI_SWE_AGENT.value]
     )
 
@@ -225,6 +251,276 @@ def test_mismatched_protocol_is_rejected(tmp_path: Path) -> None:
         Verified10Campaign(PROTOCOL, tmp_path / "out", runner=runner).status()
 
 
+def test_state_load_revalidates_public_problem_statement_hash(tmp_path: Path) -> None:
+    protocol = load_verified10_protocol(PROTOCOL)
+    campaign = Verified10Campaign(PROTOCOL, tmp_path / "out", runner=FakeRunner(protocol))
+    campaign.prepare()
+    state_path = tmp_path / "out" / "campaign-state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["public_tasks"][protocol.tasks[0].instance_id] = "tampered problem"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    with pytest.raises(CampaignExecutionError, match="public task"):
+        campaign.status()
+
+
+def test_prepare_refuses_to_adopt_any_existing_output_directory(tmp_path: Path) -> None:
+    protocol = load_verified10_protocol(PROTOCOL)
+    for name in ("empty", "nonempty"):
+        output = tmp_path / name
+        output.mkdir()
+        if name == "nonempty":
+            (output / "foreign.txt").write_text("foreign", encoding="utf-8")
+        with pytest.raises(CampaignExecutionError, match="must not exist"):
+            Verified10Campaign(PROTOCOL, output, runner=FakeRunner(protocol)).prepare()
+
+
+def test_resume_commands_require_existing_campaign_state(tmp_path: Path) -> None:
+    protocol = load_verified10_protocol(PROTOCOL)
+    campaign = Verified10Campaign(PROTOCOL, tmp_path / "missing", runner=FakeRunner(protocol))
+    with pytest.raises(CampaignExecutionError, match="state"):
+        campaign.status()
+    assert not (tmp_path / "missing").exists()
+
+
+def test_campaign_rejects_filesystem_root_output() -> None:
+    with pytest.raises(CampaignExecutionError, match="filesystem root"):
+        Verified10Campaign(PROTOCOL, Path(PROTOCOL.anchor))
+
+
+def test_mini_malformed_predictions_are_protocol_failure_not_completed_empty(
+    tmp_path: Path,
+) -> None:
+    protocol = load_verified10_protocol(PROTOCOL)
+    campaign = Verified10Campaign(PROTOCOL, tmp_path / "campaign", runner=FakeRunner(protocol))
+    task = protocol.tasks[0]
+    output = tmp_path / "campaign" / "mini-output"
+    output.mkdir(parents=True)
+    expected = {
+        "model_name_or_path": "openai/deepseek-v4-flash",
+        "instance_id": task.instance_id,
+        "model_patch": "diff --git a/a b/a\n",
+    }
+    (output / "preds.json").write_text(
+        json.dumps({task.instance_id: expected, "stale__instance-1": expected}),
+        encoding="utf-8",
+    )
+    trajectory = output / task.instance_id / f"{task.instance_id}.traj.json"
+    trajectory.parent.mkdir()
+    problem = next(
+        row["problem_statement"] for row in public_rows() if row["instance_id"] == task.instance_id
+    )
+    trajectory.write_text(
+        json.dumps(
+            {
+                "instance_id": task.instance_id,
+                "info": {"exit_status": "submitted", "model_stats": {}},
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            "Consider the following PR description:\n"
+                            + problem
+                            + "\n</pr_description>"
+                        ),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    attempt = campaign._parse_mini_result(
+        task, output, trajectory, CampaignCommandResult(0, "", ""), 0.0
+    )
+
+    assert attempt.status.value == "FAILED"
+    assert attempt.failure_class.value == "PROTOCOL_FAILED"
+    assert attempt.model_patch == ""
+    assert "steps" in attempt.telemetry_unavailable
+
+    (output / "preds.json").write_text(json.dumps({task.instance_id: expected}), encoding="utf-8")
+    trajectory_payload = json.loads(trajectory.read_text(encoding="utf-8"))
+    trajectory_payload["info"]["exit_status"] = "LimitsExceeded"
+    trajectory.write_text(json.dumps(trajectory_payload), encoding="utf-8")
+    failed_with_patch = campaign._parse_mini_result(
+        task, output, trajectory, CampaignCommandResult(0, "", ""), 0.0
+    )
+    assert failed_with_patch.status.value == "FAILED"
+    assert failed_with_patch.failure_class.value == "MODEL_FAILED"
+    assert failed_with_patch.model_patch == expected["model_patch"]
+
+    trajectory_payload["info"]["exit_status"] = "submitted"
+    trajectory_payload["messages"][0]["content"] = (
+        "Consider the following PR description:\ntampered\n</pr_description>"
+    )
+    trajectory.write_text(json.dumps(trajectory_payload), encoding="utf-8")
+    prompt_drift = campaign._parse_mini_result(
+        task, output, trajectory, CampaignCommandResult(0, "", ""), 0.0
+    )
+    assert prompt_drift.status.value == "FAILED"
+    assert prompt_drift.failure_class.value == "PROTOCOL_FAILED"
+    assert prompt_drift.model_patch == expected["model_patch"]
+
+
+@pytest.mark.parametrize("exec_code", [1, 20, 22])
+def test_agentforge_fresh_command_flow_uses_problem_and_accepts_terminal_codes(
+    tmp_path: Path,
+    exec_code: int,
+) -> None:
+    protocol = load_verified10_protocol(PROTOCOL)
+    run_id = "00000000-0000-0000-0000-000000000123"
+    approval_ids = (
+        "00000000-0000-0000-0000-000000000201",
+        "00000000-0000-0000-0000-000000000202",
+    )
+
+    class AgentForgeRunner(FakeRunner):
+        def __init__(self, protocol) -> None:
+            super().__init__(protocol)
+            self.resumed = False
+
+        def run(self, command: CampaignCommand) -> CampaignCommandResult:
+            argv = command.argv
+            if "agentforge" not in argv:
+                return super().run(command)
+            self.commands.append(command)
+            action = argv[argv.index("agentforge") + 1]
+            if action == "exec":
+                return CampaignCommandResult(exec_code, f"run_id={run_id}\n", "")
+            if action == "approvals":
+                return CampaignCommandResult(
+                    0,
+                    "\n".join(
+                        f"approval_id={approval_id} run_id={run_id} tool=edit_file"
+                        for approval_id in approval_ids
+                    ),
+                    "",
+                )
+            if action == "resume":
+                self.resumed = True
+                return CampaignCommandResult(22, f"run_id={run_id}\n", "")
+            if action == "inspect":
+                lifecycle = "TERMINAL" if self.resumed else "PAUSED"
+                return CampaignCommandResult(
+                    0, f"run_id={run_id} lifecycle={lifecycle} outcome=UNVERIFIED\n", ""
+                )
+            return CampaignCommandResult(0, "", "")
+
+    class ContractCampaign(Verified10Campaign):
+        def _preflight_agentforge(self, workspace: Path, task) -> None:
+            return None
+
+        def _git_patch(self, workspace: Path, task) -> str:
+            return "diff --git a/user.py b/user.py\n"
+
+        @staticmethod
+        def _agentforge_telemetry(workspace: Path, durable_run_id: str) -> dict[str, object]:
+            return {
+                "lifecycle": "TERMINAL",
+                "model_calls": 3,
+                "steps": 4,
+                "approval_count": 2,
+                "edit_count": 1,
+                "test_count": 1,
+                "event_count": 9,
+                "unavailable": ("provider_prompt_tokens",),
+            }
+
+    runner = AgentForgeRunner(protocol)
+    campaign = ContractCampaign(PROTOCOL, tmp_path / "out", runner=runner)
+    campaign.prepare()
+    state_path = tmp_path / "out" / "campaign-state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["attempts"][BenchmarkArm.AGENTFORGE.value] = [
+        {
+            "instance_id": task.instance_id,
+            "attempt_index": 1,
+            "status": "FAILED",
+            "failure_class": "MODEL_FAILED",
+        }
+        for task in protocol.tasks[1:]
+    ]
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    campaign.run_agentforge()
+
+    exec_command = next(command for command in runner.commands if "exec" in command.argv)
+    expected_problem = next(
+        row["problem_statement"]
+        for row in public_rows()
+        if row["instance_id"] == protocol.tasks[0].instance_id
+    )
+    assert exec_command.argv[-1] == expected_problem
+    assert sum("approve" in command.argv for command in runner.commands) == 2
+    record = json.loads(state_path.read_text(encoding="utf-8"))["attempts"][
+        BenchmarkArm.AGENTFORGE.value
+    ][0]
+    assert record["run_id"] == run_id
+    assert record["status"] == "COMPLETED"
+    assert record["model_patch"]
+
+
+def test_agentforge_failure_after_run_id_preserves_durable_recovery_identity(
+    tmp_path: Path,
+) -> None:
+    protocol = load_verified10_protocol(PROTOCOL)
+    run_id = "00000000-0000-0000-0000-000000000321"
+
+    class FailingRunner(FakeRunner):
+        def run(self, command: CampaignCommand) -> CampaignCommandResult:
+            argv = command.argv
+            if "agentforge" not in argv:
+                return super().run(command)
+            self.commands.append(command)
+            action = argv[argv.index("agentforge") + 1]
+            if action == "exec":
+                return CampaignCommandResult(20, f"run_id={run_id}\n", "")
+            if action == "inspect":
+                return CampaignCommandResult(0, f"run_id={run_id} lifecycle=RUNNING\n", "")
+            if action == "approvals":
+                return CampaignCommandResult(0, "", "")
+            if action == "resume":
+                return CampaignCommandResult(2, "", "resume infrastructure failure")
+            return CampaignCommandResult(0, "", "")
+
+    class ContractCampaign(Verified10Campaign):
+        def _preflight_agentforge(self, workspace: Path, task) -> None:
+            return None
+
+        def _git_patch(self, workspace: Path, task) -> str:
+            return "diff --git a/user.py b/user.py\n"
+
+        @staticmethod
+        def _agentforge_telemetry(workspace: Path, durable_run_id: str) -> dict[str, object]:
+            return {"lifecycle": "RUNNING", "unavailable": ("model_usage",)}
+
+    runner = FailingRunner(protocol)
+    campaign = ContractCampaign(PROTOCOL, tmp_path / "out", runner=runner)
+    campaign.prepare()
+    state_path = tmp_path / "out" / "campaign-state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["attempts"][BenchmarkArm.AGENTFORGE.value] = [
+        {
+            "instance_id": task.instance_id,
+            "attempt_index": 1,
+            "status": "FAILED",
+            "failure_class": "MODEL_FAILED",
+        }
+        for task in protocol.tasks[1:]
+    ]
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    campaign.run_agentforge()
+
+    record = json.loads(state_path.read_text(encoding="utf-8"))["attempts"][
+        BenchmarkArm.AGENTFORGE.value
+    ][0]
+    assert record["status"] == "FAILED"
+    assert record["run_id"] == run_id
+    assert record["model_patch"]
+
+
 def test_cli_main_uses_fake_campaign_and_stable_domain_errors(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -246,3 +542,53 @@ def test_cli_main_uses_fake_campaign_and_stable_domain_errors(
     assert captured.err.strip() == "stable campaign error"
     assert "Traceback" not in captured.err
     assert calls
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["prepare"], "prepare"),
+        (["run-agentforge"], "agentforge"),
+        (["run-mini", "--mini-root", str(MINI_ROOT)], "mini"),
+        (["status"], "status"),
+        (["finalize-predictions", "--arm", "AGENTFORGE"], "finalize"),
+    ],
+)
+def test_cli_main_dispatches_every_campaign_command_with_fake_runner(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    argv: list[str],
+    expected: str,
+) -> None:
+    calls: list[str] = []
+
+    class FakeCampaign:
+        def __init__(self, protocol: Path, output: Path) -> None:
+            return None
+
+        def prepare(self) -> None:
+            calls.append("prepare")
+
+        def run_agentforge(self, **kwargs: object) -> None:
+            calls.append("agentforge")
+
+        def run_mini(self, **kwargs: object) -> None:
+            calls.append("mini")
+
+        def status(self) -> dict[str, object]:
+            calls.append("status")
+            return {"AGENTFORGE": {"planned": 10}, "MINI_SWE_AGENT": {"planned": 10}}
+
+        def finalize_predictions(self, arm: BenchmarkArm) -> None:
+            calls.append("finalize")
+
+    result = main(
+        [*argv, "--protocol", str(PROTOCOL), "--output-dir", str(tmp_path / "out")],
+        campaign_factory=FakeCampaign,
+    )
+    captured = capsys.readouterr()
+    assert result == 0
+    assert calls == [expected]
+    assert "Traceback" not in captured.err
+    if expected == "prepare":
+        assert captured.out == "admission=10/10\n"

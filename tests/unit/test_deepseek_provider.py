@@ -37,6 +37,27 @@ class FakeClient:
         self.chat = SimpleNamespace(completions=FakeCompletions(response, error))
 
 
+def test_provider_binds_configured_client_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def build_client(**kwargs: object) -> FakeClient:
+        captured.update(kwargs)
+        return FakeClient()
+
+    monkeypatch.setattr("agentforge.models.deepseek_provider.AsyncOpenAI", build_client)
+    DeepSeekModelProvider(
+        ModelProviderConfig(
+            api_key="secret",
+            model="deepseek-account-model",
+            timeout_seconds=600.0,
+            temperature=0.0,
+        )
+    )
+
+    assert captured["timeout"] == 600.0
+    assert captured["max_retries"] == 0
+
+
 def tool_spec(
     name: str = "read_file",
     *,
@@ -125,6 +146,7 @@ async def test_provider_maps_messages_tools_usage_and_fixed_options() -> None:
             api_key="secret",
             model="deepseek-account-model",
             max_output_tokens=800,
+            temperature=0.0,
         ),
         client=client,
     )
@@ -163,6 +185,7 @@ async def test_provider_maps_messages_tools_usage_and_fixed_options() -> None:
     tools = sent["tools"]
     assert isinstance(tools, list)
     assert tools[0]["function"]["name"] == "read_file"
+    assert sent["temperature"] == 0.0
 
 
 @pytest.mark.asyncio

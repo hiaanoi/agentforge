@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol, Self
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -32,7 +33,7 @@ MINI_COMMIT = "25941c89cfbc91eb40b3f8756348c91d9977d57e"
 MINI_VERSION = "2.4.6"
 MINI_LOCK_SHA256 = "cbff5b81ed1a8b8763fa5b57f71a6c1b365a2a79eff44b096f2f1258ea479eb8"
 APPROVAL_REQUIRED = 20
-_TERMINAL_RETURN_CODES = frozenset({0, 1, 22})
+_TERMINAL_RETURN_CODES = frozenset({0, 1, 20, 22})
 _UUID_PATTERN = re.compile(
     r"(?<![0-9a-f])([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![0-9a-f])",
     re.IGNORECASE,
@@ -148,6 +149,8 @@ def agentforge_runtime(task_id: str) -> str:
     python = sys.executable.replace("\\", "/")
     return f'''[provider]
 kind = "deepseek"
+timeout_seconds = 600.0
+temperature = 0.0
 
 [model_budget]
 max_model_requests = 52
@@ -323,7 +326,7 @@ class CampaignAttempt(_FrozenModel):
     trajectory_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
     telemetry_unavailable: tuple[str, ...] = ()
     provider_capabilities: Mapping[str, str] = Field(
-        default_factory=lambda: {"temperature_control": "UNAVAILABLE"}
+        default_factory=lambda: {"temperature_control": "BOUND"}
     )
 
     @field_validator("telemetry_unavailable", mode="before")
@@ -336,6 +339,16 @@ class CampaignAttempt(_FrozenModel):
     def relative_trajectory(cls, value: str | None) -> str | None:
         return _safe_relative(value) if value is not None else None
 
+    @field_validator("run_id")
+    @classmethod
+    def durable_run_id_is_uuid(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            return str(UUID(value))
+        except ValueError:
+            raise ValueError("run_id must be a UUID") from None
+
     @model_validator(mode="after")
     def consistent_terminal_state(self) -> Self:
         terminal = self.status in {AttemptStatus.COMPLETED, AttemptStatus.FAILED}
@@ -347,6 +360,7 @@ class CampaignAttempt(_FrozenModel):
 
 
 class WorkspaceRecord(_FrozenModel):
+    workspace_role: Literal["PREPARED_PROVENANCE"] = "PREPARED_PROVENANCE"
     path: str
     image_tag: str
     image_digest: str = Field(pattern=r"^.+@sha256:[0-9a-f]{64}$")
