@@ -596,7 +596,14 @@ class VerificationCapsuleBuilder:
             root_item = os.lstat(root)
         except FileNotFoundError:
             return
+        if VerificationCapsuleBuilder._is_link_or_reparse(root_item):
+            try:
+                root.unlink()
+            except OSError:
+                pass
+            return
         if not stat.S_ISDIR(root_item.st_mode):
+            VerificationCapsuleBuilder._restore_owned_deletion_mode(root, root_item)
             try:
                 root.unlink()
             except OSError:
@@ -612,21 +619,26 @@ class VerificationCapsuleBuilder:
                 item = os.lstat(path)
             except OSError:
                 continue
-            if stat.S_ISDIR(item.st_mode):
+            if (
+                stat.S_ISDIR(item.st_mode)
+                and not VerificationCapsuleBuilder._is_link_or_reparse(item)
+            ):
                 directories.append(path)
         for directory in directories:
             try:
                 item = os.lstat(directory)
-                if stat.S_ISDIR(item.st_mode):
-                    VerificationCapsuleBuilder._chmod_no_follow(directory, 0o700)
+                VerificationCapsuleBuilder._restore_owned_deletion_mode(directory, item)
             except OSError:
                 continue
         for path in reversed(paths):
             try:
                 item = os.lstat(path)
-                if stat.S_ISDIR(item.st_mode):
+                if VerificationCapsuleBuilder._is_link_or_reparse(item):
+                    path.unlink()
+                elif stat.S_ISDIR(item.st_mode):
                     path.rmdir()
                 else:
+                    VerificationCapsuleBuilder._restore_owned_deletion_mode(path, item)
                     path.unlink()
             except OSError:
                 continue
@@ -634,3 +646,27 @@ class VerificationCapsuleBuilder:
             root.rmdir()
         except OSError:
             pass
+
+    @staticmethod
+    def _restore_owned_deletion_mode(path: Path, item: os.stat_result) -> None:
+        if VerificationCapsuleBuilder._is_link_or_reparse(item):
+            return
+        if stat.S_ISDIR(item.st_mode):
+            mode = 0o700
+        elif stat.S_ISREG(item.st_mode):
+            mode = 0o600
+        else:
+            return
+        if os.chmod in os.supports_follow_symlinks:
+            os.chmod(path, mode, follow_symlinks=False)
+        else:
+            # This is an owned output path whose lstat just established that it
+            # is an ordinary file or directory, never a link or reparse point.
+            os.chmod(path, mode)
+
+    @staticmethod
+    def _is_link_or_reparse(item: os.stat_result) -> bool:
+        reparse = (getattr(item, "st_file_attributes", 0) or 0) & getattr(
+            stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400
+        )
+        return stat.S_ISLNK(item.st_mode) or bool(reparse)

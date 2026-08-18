@@ -1,4 +1,5 @@
 import os
+import stat
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -244,6 +245,62 @@ def test_capture_discards_published_capsule_when_sealing_fails(
 
     assert not (store / str(capsule_id)).exists()
     assert not any(path.name.startswith(".staging-") for path in store.iterdir())
+
+
+def test_cleanup_restores_regular_file_permission_before_unlinking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    staging = tmp_path / "sealed-staging"
+    staging.mkdir()
+    sealed_file = staging / "sealed.py"
+    sealed_file.write_text("value = 1\n", encoding="utf-8")
+    permission_restored = False
+    original_unlink = Path.unlink
+
+    def chmod(path: Path, mode: int, *, follow_symlinks: bool = True) -> None:
+        nonlocal permission_restored
+        if Path(path) == sealed_file and mode == 0o600:
+            permission_restored = True
+
+    def unlink(path: Path, *args: object, **kwargs: object) -> None:
+        if Path(path) == sealed_file and not permission_restored:
+            raise PermissionError("sealed regular file")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "chmod", chmod)
+    monkeypatch.setattr(os, "supports_follow_symlinks", set())
+    monkeypatch.setattr(Path, "unlink", unlink)
+
+    VerificationCapsuleBuilder._discard_staging(staging)
+
+    assert permission_restored
+    assert not staging.exists()
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        type("LinkStat", (), {"st_mode": stat.S_IFLNK, "st_file_attributes": 0})(),
+        type(
+            "ReparseStat",
+            (),
+            {
+                "st_mode": stat.S_IFREG,
+                "st_file_attributes": getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400),
+            },
+        )(),
+    ],
+)
+def test_cleanup_never_chmods_symlink_or_reparse_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, item: object
+) -> None:
+    def forbidden_chmod(*args: object, **kwargs: object) -> None:
+        pytest.fail("cleanup must not chmod a link or reparse entry")
+
+    monkeypatch.setattr(os, "chmod", forbidden_chmod)
+    VerificationCapsuleBuilder._restore_owned_deletion_mode(
+        tmp_path / "entry", item  # type: ignore[arg-type]
+    )
 
 
 def test_sealed_mutation_is_detected_and_concurrent_captures_never_share_staging(
