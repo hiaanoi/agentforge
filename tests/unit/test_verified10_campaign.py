@@ -11,6 +11,7 @@ from agentforge.evaluation.verified10_campaign import (
     FORBIDDEN_GENERATION_FIELDS,
     AttemptStatus,
     AttemptFailureClass,
+    CampaignArtifactError,
     BenchmarkArm,
     BenchmarkAttemptRecord,
     Verified10Protocol,
@@ -243,7 +244,7 @@ def test_attempt_record_carries_typed_failure_and_private_telemetry() -> None:
 
 def test_finalizer_exports_ten_public_rows_and_private_ledger(tmp_path: Path) -> None:
     protocol = load_verified10_protocol(PROTOCOL_PATH)
-    model_identity = "deepseek/account-model"
+    model_identity = protocol.model
     predictions = []
     attempts = []
     failure_classes = (
@@ -301,6 +302,47 @@ def test_finalizer_exports_ten_public_rows_and_private_ledger(tmp_path: Path) ->
     assert all(set(row) == {"instance_id", "model_name_or_path", "model_patch"} for row in public)
     assert result.predictions_sha256 == hashlib.sha256((tmp_path / "predictions.json").read_bytes()).hexdigest()
     assert result.ledger_sha256 == hashlib.sha256((tmp_path / "ledger.json").read_bytes()).hexdigest()
+
+
+def test_finalizer_rejects_wrong_prediction_checkout_and_model_identity(tmp_path: Path) -> None:
+    protocol = load_verified10_protocol(PROTOCOL_PATH)
+    predictions = []
+    attempts = []
+    for task in protocol.tasks:
+        binding = SWEbenchInstanceBinding(
+            instance_id=task.instance_id, repo=task.repo, base_commit=task.base_commit
+        )
+        predictions.append(SWEbenchPrediction.empty(binding, protocol.model))
+        attempts.append(
+            BenchmarkAttemptRecord(
+                protocol_sha256=protocol.protocol_sha256,
+                arm=BenchmarkArm.AGENTFORGE,
+                instance_id=task.instance_id,
+                attempt_index=1,
+                status=AttemptStatus.FAILED,
+                prediction_patch_sha256=predictions[-1].patch_sha256,
+            )
+        )
+    wrong_checkout = predictions[0].model_copy(update={"base_commit": "0" * 40})
+    with pytest.raises(CampaignArtifactError, match="base commit"):
+        finalize_verified10_campaign(
+            protocol,
+            attempts,
+            [wrong_checkout, *predictions[1:]],
+            tmp_path / "bad-checkout.json",
+            tmp_path / "bad-checkout-ledger.json",
+        )
+    wrong_identity = predictions[0].model_copy(
+        update={"model_name_or_path": "agentforge:wrong-model"}
+    )
+    with pytest.raises(CampaignArtifactError, match="identity"):
+        finalize_verified10_campaign(
+            protocol,
+            attempts,
+            [wrong_identity, *predictions[1:]],
+            tmp_path / "bad-identity.json",
+            tmp_path / "bad-identity-ledger.json",
+        )
 
 
 @pytest.mark.parametrize("content", [b"\x80", b"{", b"[]", b'{"schema_version": 999}'])

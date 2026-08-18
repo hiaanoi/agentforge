@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _GIT_TIMEOUT_SECONDS = 30.0
 _MAX_GIT_OUTPUT_BYTES = 1024 * 1024
@@ -34,6 +34,13 @@ class SWEbenchPrediction(BaseModel):
     model_patch: str
     base_commit: str
     patch_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_patch_digest(self) -> SWEbenchPrediction:
+        actual = hashlib.sha256(self.model_patch.encode("utf-8")).hexdigest()
+        if self.patch_sha256 != actual:
+            raise ValueError("patch_sha256 does not match model_patch bytes")
+        return self
 
     @classmethod
     def empty(

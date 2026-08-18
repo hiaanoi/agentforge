@@ -466,9 +466,18 @@ def finalize_verified10_campaign(
         raise CampaignArtifactError("Campaign attempts or predictions do not cover the protocol")
     by_attempt = {record.instance_id: record for record in attempts}
     by_prediction = {prediction.instance_id: prediction for prediction in predictions}
+    selected_arm = next(iter(arms))
+    expected_model_name = (
+        "agentforge:" if selected_arm is BenchmarkArm.AGENTFORGE else "mini-swe-agent:"
+    ) + protocol.model
     for instance_id in expected_ids:
         record = by_attempt[instance_id]
         prediction = by_prediction[instance_id]
+        task = next(task for task in protocol.tasks if task.instance_id == instance_id)
+        if prediction.base_commit != task.base_commit:
+            raise CampaignArtifactError("Prediction base commit does not match protocol task")
+        if prediction.model_name_or_path != expected_model_name:
+            raise CampaignArtifactError("Prediction model identity does not match campaign arm")
         if record.attempt_index != 1:
             raise CampaignArtifactError("Campaign attempt index is not one")
         if record.prediction_patch_sha256 != prediction.patch_sha256:

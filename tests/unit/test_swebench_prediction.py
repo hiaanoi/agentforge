@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from agentforge.evaluation.swebench_prediction import (
     SWEbenchPrediction,
@@ -84,6 +85,17 @@ def test_empty_prediction_preserves_failure_as_standard_record() -> None:
     assert prediction.patch_sha256 == hashlib.sha256(b"").hexdigest()
     assert prediction.base_commit == binding.base_commit
     assert prediction.model_name_or_path == "agentforge:deepseek/account-model"
+
+
+def test_prediction_rejects_forged_legal_patch_sha256() -> None:
+    with pytest.raises(ValidationError, match="patch_sha256"):
+        SWEbenchPrediction(
+            instance_id="sympy__sympy-20590",
+            model_name_or_path="agentforge:deepseek/account-model",
+            model_patch="diff --git a/source.py b/source.py\n",
+            base_commit="a" * 40,
+            patch_sha256="a" * 64,
+        )
 
 
 def test_capture_rejects_wrong_head(tmp_path: Path) -> None:
