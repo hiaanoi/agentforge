@@ -87,6 +87,14 @@ def test_empty_prediction_preserves_failure_as_standard_record() -> None:
     assert prediction.model_name_or_path == "agentforge:deepseek/account-model"
 
 
+def test_empty_prediction_namespace_is_explicit_and_rejects_double_prefix() -> None:
+    binding = _binding("a" * 40)
+    mini = SWEbenchPrediction.empty(binding, "deepseek-v4-flash", namespace="mini-swe-agent")
+    assert mini.model_name_or_path == "mini-swe-agent:deepseek-v4-flash"
+    with pytest.raises(SWEbenchPredictionError, match="prefix"):
+        SWEbenchPrediction.empty(binding, "agentforge:deepseek-v4-flash")
+
+
 def test_prediction_rejects_forged_legal_patch_sha256() -> None:
     with pytest.raises(ValidationError, match="patch_sha256"):
         SWEbenchPrediction(
@@ -245,6 +253,20 @@ def test_save_predictions_orders_shuffled_input_and_rejects_wrong_denominator(
     ]
     with pytest.raises(SWEbenchPredictionError, match="duplicate"):
         save_swebench_predictions(output, predictions, expected_instance_ids=("instance-a", "instance-a"))
+
+
+def test_save_predictions_revalidates_model_copy_forgery(tmp_path: Path) -> None:
+    binding = SWEbenchInstanceBinding(
+        instance_id="instance-a", repo="sympy/sympy", base_commit="a" * 40
+    )
+    forged = SWEbenchPrediction.empty(binding, "deepseek/account-model").model_copy(
+        update={"model_patch": "forged"}
+    )
+
+    with pytest.raises(SWEbenchPredictionError):
+        save_swebench_predictions(
+            tmp_path / "predictions.json", [forged], expected_instance_ids=("instance-a",)
+        )
 
 
 def test_cli_exports_without_printing_patch(

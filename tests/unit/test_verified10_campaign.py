@@ -23,6 +23,8 @@ from agentforge.evaluation.verified10_campaign import (
     public_task_sha256,
     validate_public_task,
     finalize_verified10_campaign,
+    load_attempt_ledger,
+    save_attempt_ledger,
 )
 from agentforge.evaluation.swebench_prediction import SWEbenchInstanceBinding, SWEbenchPrediction
 
@@ -242,6 +244,76 @@ def test_attempt_record_carries_typed_failure_and_private_telemetry() -> None:
     assert BenchmarkAttemptRecord.model_validate_json(record.model_dump_json()) == record
 
 
+def test_attempt_ledger_save_load_roundtrip(tmp_path: Path) -> None:
+    protocol = load_verified10_protocol(PROTOCOL_PATH)
+    record = BenchmarkAttemptRecord(
+        protocol_sha256=protocol.protocol_sha256,
+        arm=BenchmarkArm.AGENTFORGE,
+        instance_id=EXPECTED_INSTANCE_IDS[0],
+        attempt_index=1,
+        status=AttemptStatus.FAILED,
+        failure_class=AttemptFailureClass.MODEL_FAILED,
+    )
+    path = tmp_path / "ledger.json"
+
+    save_attempt_ledger(path, [record])
+
+    assert load_attempt_ledger(path) == (record,)
+
+
+def test_attempt_ledger_save_revalidates_model_copy_forgery(tmp_path: Path) -> None:
+    protocol = load_verified10_protocol(PROTOCOL_PATH)
+    record = BenchmarkAttemptRecord(
+        protocol_sha256=protocol.protocol_sha256,
+        arm=BenchmarkArm.AGENTFORGE,
+        instance_id=EXPECTED_INSTANCE_IDS[0],
+        attempt_index=1,
+        status=AttemptStatus.FAILED,
+        failure_class=AttemptFailureClass.MODEL_FAILED,
+    ).model_copy(update={"model_calls": -1})
+
+    with pytest.raises(CampaignArtifactError):
+        save_attempt_ledger(tmp_path / "ledger.json", [record])
+
+
+def test_attempt_record_rejects_inconsistent_status_and_failure_class() -> None:
+    protocol = load_verified10_protocol(PROTOCOL_PATH)
+    kwargs = {
+        "protocol_sha256": protocol.protocol_sha256,
+        "arm": BenchmarkArm.AGENTFORGE,
+        "instance_id": EXPECTED_INSTANCE_IDS[0],
+        "attempt_index": 1,
+    }
+    with pytest.raises(ValidationError):
+        BenchmarkAttemptRecord(**kwargs, status=AttemptStatus.FAILED)
+    with pytest.raises(ValidationError):
+        BenchmarkAttemptRecord(
+            **kwargs,
+            status=AttemptStatus.PLANNED,
+            failure_class=AttemptFailureClass.MODEL_FAILED,
+        )
+    with pytest.raises(ValidationError):
+        BenchmarkAttemptRecord(
+            **kwargs,
+            status=AttemptStatus.RUNNING,
+            trajectory_path="../../secret.json",
+        )
+
+
+def test_finalizer_revalidates_frozen_protocol_before_writes(tmp_path: Path) -> None:
+    protocol = load_verified10_protocol(PROTOCOL_PATH)
+    shrunk = protocol.model_copy(update={"tasks": protocol.tasks[:-1]})
+
+    with pytest.raises(CampaignArtifactError):
+        finalize_verified10_campaign(
+            shrunk,
+            [],
+            [],
+            tmp_path / "predictions.json",
+            tmp_path / "ledger.json",
+        )
+
+
 def test_finalizer_exports_ten_public_rows_and_private_ledger(tmp_path: Path) -> None:
     protocol = load_verified10_protocol(PROTOCOL_PATH)
     model_identity = protocol.model
@@ -274,6 +346,8 @@ def test_finalizer_exports_ten_public_rows_and_private_ledger(tmp_path: Path) ->
             prediction = SWEbenchPrediction.empty(binding, model_identity)
             status = AttemptStatus.COMPLETED if index == 1 else AttemptStatus.FAILED
             failure_class = failure_classes[index % len(failure_classes)]
+            if status is AttemptStatus.FAILED and failure_class is AttemptFailureClass.NONE:
+                failure_class = AttemptFailureClass.MODEL_FAILED
             patch_hash = prediction.patch_sha256
         predictions.append(prediction)
         attempts.append(
@@ -298,10 +372,27 @@ def test_finalizer_exports_ten_public_rows_and_private_ledger(tmp_path: Path) ->
     public = json.loads((tmp_path / "predictions.json").read_text())
     ledger = json.loads((tmp_path / "ledger.json").read_text())
     assert [row["instance_id"] for row in public] == list(EXPECTED_INSTANCE_IDS)
+    assert [row["instance_id"] for row in ledger] == list(EXPECTED_INSTANCE_IDS)
     assert len(ledger) == 10
     assert all(set(row) == {"instance_id", "model_name_or_path", "model_patch"} for row in public)
     assert result.predictions_sha256 == hashlib.sha256((tmp_path / "predictions.json").read_bytes()).hexdigest()
     assert result.ledger_sha256 == hashlib.sha256((tmp_path / "ledger.json").read_bytes()).hexdigest()
+    with pytest.raises(CampaignArtifactError, match="exist"):
+        finalize_verified10_campaign(
+            protocol,
+            attempts,
+            predictions,
+            tmp_path / "predictions.json",
+            tmp_path / "ledger.json",
+        )
+    with pytest.raises(CampaignArtifactError, match="same"):
+        finalize_verified10_campaign(
+            protocol,
+            attempts,
+            predictions,
+            tmp_path / "same.json",
+            tmp_path / "same.json",
+        )
 
 
 def test_finalizer_preflights_ledger_parent_before_public_publish(tmp_path: Path) -> None:
@@ -321,6 +412,7 @@ def test_finalizer_preflights_ledger_parent_before_public_publish(tmp_path: Path
                 instance_id=task.instance_id,
                 attempt_index=1,
                 status=AttemptStatus.FAILED,
+                failure_class=AttemptFailureClass.MODEL_FAILED,
                 prediction_patch_sha256=prediction.patch_sha256,
             )
         )
@@ -355,6 +447,7 @@ def test_finalizer_rejects_wrong_prediction_checkout_and_model_identity(tmp_path
                 instance_id=task.instance_id,
                 attempt_index=1,
                 status=AttemptStatus.FAILED,
+                failure_class=AttemptFailureClass.MODEL_FAILED,
                 prediction_patch_sha256=predictions[-1].patch_sha256,
             )
         )
@@ -397,11 +490,12 @@ def test_finalizer_recomputes_forged_model_copy_patch_digest(tmp_path: Path) -> 
                 instance_id=task.instance_id,
                 attempt_index=1,
                 status=AttemptStatus.FAILED,
+                failure_class=AttemptFailureClass.MODEL_FAILED,
                 prediction_patch_sha256=prediction.patch_sha256,
             )
         )
     forged = predictions[0].model_copy(update={"model_patch": "forged"})
-    with pytest.raises(CampaignArtifactError, match="patch digest"):
+    with pytest.raises(CampaignArtifactError, match="validation|patch digest"):
         finalize_verified10_campaign(
             protocol,
             attempts,
@@ -428,12 +522,13 @@ def test_finalizer_rejects_nonterminal_attempts(tmp_path: Path) -> None:
                 instance_id=task.instance_id,
                 attempt_index=1,
                 status=AttemptStatus.FAILED,
+                failure_class=AttemptFailureClass.MODEL_FAILED,
                 prediction_patch_sha256=prediction.patch_sha256,
             )
         )
     for status in (AttemptStatus.PLANNED, AttemptStatus.RUNNING):
         nonterminal = [attempts[0].model_copy(update={"status": status}), *attempts[1:]]
-        with pytest.raises(CampaignArtifactError, match="terminal"):
+        with pytest.raises(CampaignArtifactError, match="validation|terminal"):
             finalize_verified10_campaign(
                 protocol,
                 nonterminal,

@@ -13,11 +13,13 @@ from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Self
+from uuid import uuid4
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    TypeAdapter,
     ValidationError,
     field_validator,
     model_validator,
@@ -189,6 +191,9 @@ class AttemptFailureClass(StrEnum):
     MODEL_FAILED = "MODEL_FAILED"
     MODEL = "MODEL_FAILED"
     TIMEOUT = "TIMEOUT"
+
+
+ATTEMPT_FAILURE_CLASS_VALUES = tuple(item.value for item in AttemptFailureClass)
 
 
 class _FrozenModel(BaseModel):
@@ -385,6 +390,22 @@ class BenchmarkAttemptRecord(_FrozenModel):
     trajectory_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
     prediction_patch_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
 
+    @model_validator(mode="after")
+    def validate_status_failure(self) -> Self:
+        if self.status is AttemptStatus.FAILED and self.failure_class is AttemptFailureClass.NONE:
+            raise ValueError("FAILED attempts require a failure class")
+        if (
+            self.status in {AttemptStatus.PLANNED, AttemptStatus.RUNNING}
+            and self.failure_class is not AttemptFailureClass.NONE
+        ):
+            raise ValueError("non-terminal attempts must not have a failure class")
+        if (
+            self.status is AttemptStatus.COMPLETED
+            and self.failure_class not in {AttemptFailureClass.NONE, AttemptFailureClass.EMPTY}
+        ):
+            raise ValueError("COMPLETED attempts only allow NONE or EMPTY failure class")
+        return self
+
     @field_validator("trajectory_path")
     @classmethod
     def validate_trajectory_path(cls, value: str | None) -> str | None:
@@ -411,11 +432,25 @@ class CampaignArtifactResult(_FrozenModel):
     ledger_sha256: str = Field(pattern=SHA256_PATTERN)
 
 
+def _revalidate_attempt(record: BenchmarkAttemptRecord) -> BenchmarkAttemptRecord:
+    try:
+        return BenchmarkAttemptRecord.model_validate(record.model_dump(mode="python"))
+    except (AttributeError, TypeError, ValueError, ValidationError):
+        raise CampaignArtifactError("Campaign attempt failed validation") from None
+
+
+def _revalidate_protocol(protocol: Verified10Protocol) -> Verified10Protocol:
+    try:
+        return Verified10Protocol.model_validate(protocol.model_dump(mode="python"))
+    except (AttributeError, TypeError, ValueError, ValidationError):
+        raise CampaignArtifactError("Campaign protocol failed validation") from None
+
+
 def save_attempt_ledger(path: str | Path, attempts: Sequence[BenchmarkAttemptRecord]) -> str:
     """Atomically save the private attempt ledger and return its written-byte digest."""
 
-    target = _prepare_artifact_target(path)
     payload = _serialize_attempt_ledger(attempts)
+    target = _prepare_artifact_target(path)
     _atomic_artifact_write(target, payload)
     try:
         return hashlib.sha256(target.read_bytes()).hexdigest()
@@ -428,10 +463,7 @@ def load_attempt_ledger(path: str | Path) -> tuple[BenchmarkAttemptRecord, ...]:
 
     try:
         content = Path(path).expanduser().resolve(strict=True).read_bytes()
-        decoded = json.loads(content)
-        if not isinstance(decoded, list):
-            raise ValueError
-        return tuple(BenchmarkAttemptRecord.model_validate(item) for item in decoded)
+        return TypeAdapter(tuple[BenchmarkAttemptRecord, ...]).validate_json(content)
     except (OSError, UnicodeError, ValueError, TypeError, ValidationError):
         raise CampaignArtifactError("Unable to load campaign attempt ledger") from None
 
@@ -446,6 +478,17 @@ def finalize_verified10_campaign(
 ) -> CampaignArtifactResult:
     """Validate a complete pass and atomically emit public predictions plus private ledger."""
 
+    protocol = _revalidate_protocol(protocol)
+    try:
+        attempts = tuple(_revalidate_attempt(record) for record in attempts)
+        predictions = tuple(
+            SWEbenchPrediction.model_validate(prediction.model_dump(mode="python"))
+            for prediction in predictions
+        )
+    except (AttributeError, TypeError, ValueError, ValidationError):
+        raise CampaignArtifactError("Campaign artifact failed validation") from None
+    if len(protocol.tasks) != 10:
+        raise CampaignArtifactError("Campaign protocol must contain exactly ten tasks")
     expected_ids = tuple(task.instance_id for task in protocol.tasks)
     if len(attempts) != len(expected_ids) or len(predictions) != len(expected_ids):
         raise CampaignArtifactError(
@@ -504,9 +547,13 @@ def finalize_verified10_campaign(
         prediction_payload = serialize_swebench_predictions(
             tuple(by_prediction.values()), expected_instance_ids=expected_ids
         )
-        ledger_payload = _serialize_attempt_ledger(attempts)
-        prediction_target = _prepare_artifact_target(prediction_path)
-        ledger_target = _prepare_artifact_target(ledger_path)
+        ordered_attempts = tuple(by_attempt[instance_id] for instance_id in expected_ids)
+        ledger_payload = _serialize_attempt_ledger(ordered_attempts)
+        prediction_target, ledger_target = _ensure_distinct_artifacts(
+            prediction_path, ledger_path
+        )
+        prediction_target = _prepare_artifact_target(prediction_target, reject_existing=True)
+        ledger_target = _prepare_artifact_target(ledger_target, reject_existing=True)
         # Files are not a transaction: the public prediction is the final commit marker.
         _atomic_artifact_write(ledger_target, ledger_payload)
         _atomic_artifact_write(prediction_target, prediction_payload)
@@ -523,13 +570,19 @@ def finalize_verified10_campaign(
 
 
 def _atomic_artifact_write(target: Path, payload: bytes) -> None:
-    temporary = target.with_name(f".{target.name}.tmp")
+    temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
     try:
         with temporary.open("wb") as stream:
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, target)
+        if os.name != "nt":
+            directory_fd = os.open(target.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     except OSError:
         try:
             temporary.unlink(missing_ok=True)
@@ -540,9 +593,10 @@ def _atomic_artifact_write(target: Path, payload: bytes) -> None:
 
 def _serialize_attempt_ledger(attempts: Sequence[BenchmarkAttemptRecord]) -> bytes:
     try:
+        validated = tuple(_revalidate_attempt(record) for record in attempts)
         return (
             json.dumps(
-                [record.model_dump(mode="json") for record in attempts],
+                [record.model_dump(mode="json") for record in validated],
                 ensure_ascii=True,
                 sort_keys=True,
                 separators=(",", ":"),
@@ -553,15 +607,36 @@ def _serialize_attempt_ledger(attempts: Sequence[BenchmarkAttemptRecord]) -> byt
         raise CampaignArtifactError("Unable to serialize campaign ledger") from None
 
 
-def _prepare_artifact_target(path: str | Path) -> Path:
+def _prepare_artifact_target(path: str | Path, *, reject_existing: bool = False) -> Path:
     try:
         target = Path(path).expanduser().resolve(strict=False)
         target.parent.mkdir(parents=True, exist_ok=True)
-        if not target.parent.is_dir() or (target.exists() and target.is_dir()):
+        if not target.parent.is_dir() or (target.exists() and (reject_existing or target.is_dir())):
+            if reject_existing and target.exists():
+                raise CampaignArtifactError("Campaign artifact target already exists")
             raise OSError
         return target
+    except CampaignArtifactError:
+        raise
     except (OSError, RuntimeError, ValueError):
         raise CampaignArtifactError("Unable to prepare campaign artifact path") from None
+
+
+def _ensure_distinct_artifacts(
+    prediction_path: str | Path, ledger_path: str | Path
+) -> tuple[Path, Path]:
+    try:
+        prediction = Path(prediction_path).expanduser().resolve(strict=False)
+        ledger = Path(ledger_path).expanduser().resolve(strict=False)
+        if prediction == ledger:
+            raise CampaignArtifactError("Public and private artifact paths must not be the same")
+        if prediction.exists() and ledger.exists() and os.path.samefile(prediction, ledger):
+            raise CampaignArtifactError("Public and private artifacts must not be the same file")
+        return prediction, ledger
+    except CampaignArtifactError:
+        raise
+    except (OSError, RuntimeError, ValueError):
+        raise CampaignArtifactError("Unable to prepare campaign artifact paths") from None
 
 
 def project_public_task(row: Mapping[str, object]) -> dict[str, str]:

@@ -7,8 +7,10 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Literal
+from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 _GIT_TIMEOUT_SECONDS = 30.0
 _MAX_GIT_OUTPUT_BYTES = 1024 * 1024
@@ -44,13 +46,17 @@ class SWEbenchPrediction(BaseModel):
 
     @classmethod
     def empty(
-        cls, binding: SWEbenchInstanceBinding, model_identity: str
+        cls,
+        binding: SWEbenchInstanceBinding,
+        model_identity: str,
+        *,
+        namespace: Literal["agentforge", "mini-swe-agent"] = "agentforge",
     ) -> SWEbenchPrediction:
         """Construct the standard harness record for a failed/empty attempt."""
 
         return cls(
             instance_id=binding.instance_id,
-            model_name_or_path=_normalized_model_identity(model_identity),
+            model_name_or_path=_normalized_model_identity(model_identity, namespace=namespace),
             model_patch="",
             base_commit=binding.base_commit,
             patch_sha256=hashlib.sha256(b"").hexdigest(),
@@ -87,7 +93,7 @@ class SWEbenchPredictionExporter:
         model_identity: str,
     ) -> SWEbenchPrediction:
         root = self._workspace_root(workspace)
-        normalized_identity = _normalized_model_identity(model_identity)
+        normalized_identity = _normalized_model_identity(model_identity, namespace="agentforge")
 
         head = self._run_git(root, "rev-parse", "--verify", "HEAD").decode(
             "ascii"
@@ -180,6 +186,7 @@ class SWEbenchPredictionExporter:
 
 
 def save_swebench_prediction(path: Path, prediction: SWEbenchPrediction) -> None:
+    prediction = _revalidate_prediction(prediction)
     target = path.resolve(strict=False)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f".{target.name}.tmp")
@@ -226,6 +233,10 @@ def serialize_swebench_predictions(
 ) -> bytes:
     """Serialize the official prediction array without touching the filesystem."""
 
+    try:
+        predictions = tuple(_revalidate_prediction(prediction) for prediction in predictions)
+    except (TypeError, ValueError):
+        raise SWEbenchPredictionError("SWE-bench prediction failed validation") from None
     if expected_instance_ids is not None and protocol is not None:
         raise SWEbenchPredictionError("Specify expected_instance_ids or protocol, not both")
     if protocol is not None:
@@ -275,19 +286,37 @@ def load_swebench_predictions(path: str | Path) -> tuple[dict[str, str], ...]:
 read_swebench_predictions = load_swebench_predictions
 
 
-def _normalized_model_identity(model_identity: str) -> str:
+def _revalidate_prediction(prediction: SWEbenchPrediction) -> SWEbenchPrediction:
+    try:
+        return SWEbenchPrediction.model_validate(prediction.model_dump(mode="python"))
+    except (AttributeError, TypeError, ValueError, ValidationError):
+        raise SWEbenchPredictionError("SWE-bench prediction failed validation") from None
+
+
+def _normalized_model_identity(
+    model_identity: str, *, namespace: Literal["agentforge", "mini-swe-agent"]
+) -> str:
     if not model_identity or any(character.isspace() for character in model_identity):
         raise SWEbenchPredictionError("Model identity must be non-empty and whitespace-free")
-    return f"agentforge:{model_identity}"
+    if model_identity.startswith(("agentforge:", "mini-swe-agent:")):
+        raise SWEbenchPredictionError("Model identity must not include a namespace prefix")
+    return f"{namespace}:{model_identity}"
 
 
 def _atomic_write(target: Path, payload: bytes, temporary: Path) -> None:
+    temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
     try:
         with temporary.open("wb") as stream:
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, target)
+        if os.name != "nt":
+            directory_fd = os.open(target.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     except OSError as exc:
         try:
             temporary.unlink(missing_ok=True)
