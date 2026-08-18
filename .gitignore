@@ -1,6 +1,9 @@
 # Virtual environments
 .venv/
 
+# Local Git worktrees
+.worktrees/
+
 # Downloaded wheel files
 downloads/
 .downloads/
