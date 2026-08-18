@@ -7,29 +7,29 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import agentforge.evaluation.verified10_campaign as campaign_module
+from agentforge.evaluation.swebench_prediction import SWEbenchInstanceBinding, SWEbenchPrediction
 from agentforge.evaluation.verified10_campaign import (
     ATTEMPT_STATUS_VALUES,
     EXPECTED_INSTANCE_IDS,
     FORBIDDEN_GENERATION_FIELDS,
-    AttemptStatus,
     AttemptFailureClass,
-    CampaignArtifactError,
+    AttemptStatus,
     BenchmarkArm,
     BenchmarkAttemptRecord,
+    CampaignArtifactError,
     Verified10Protocol,
     Verified10ProtocolError,
     Verified10Task,
     canonical_digest,
+    finalize_verified10_campaign,
+    load_attempt_ledger,
     load_verified10_protocol,
     project_public_task,
     public_task_sha256,
-    validate_public_task,
-    finalize_verified10_campaign,
-    load_attempt_ledger,
     save_attempt_ledger,
+    validate_public_task,
 )
-import agentforge.evaluation.verified10_campaign as campaign_module
-from agentforge.evaluation.swebench_prediction import SWEbenchInstanceBinding, SWEbenchPrediction
 
 ROOT = Path(__file__).parents[2]
 PROTOCOL_PATH = ROOT / "evaluation" / "protocols" / "verified10-deepseek-flash-pass1.json"
@@ -378,8 +378,12 @@ def test_finalizer_exports_ten_public_rows_and_private_ledger(tmp_path: Path) ->
     assert [row["instance_id"] for row in ledger] == list(EXPECTED_INSTANCE_IDS)
     assert len(ledger) == 10
     assert all(set(row) == {"instance_id", "model_name_or_path", "model_patch"} for row in public)
-    assert result.predictions_sha256 == hashlib.sha256((tmp_path / "predictions.json").read_bytes()).hexdigest()
-    assert result.ledger_sha256 == hashlib.sha256((tmp_path / "ledger.json").read_bytes()).hexdigest()
+    assert result.predictions_sha256 == hashlib.sha256(
+        (tmp_path / "predictions.json").read_bytes()
+    ).hexdigest()
+    assert result.ledger_sha256 == hashlib.sha256(
+        (tmp_path / "ledger.json").read_bytes()
+    ).hexdigest()
     with pytest.raises(CampaignArtifactError, match="exist"):
         finalize_verified10_campaign(
             protocol,
@@ -436,7 +440,7 @@ def test_finalizer_preflights_ledger_parent_before_public_publish(tmp_path: Path
     locked_public = tmp_path / "locked-public.json"
     lock_path = locked_public.with_name(f".{locked_public.name}.finalize.lock")
     lock_path.write_text("stale", encoding="utf-8")
-    with pytest.raises(CampaignArtifactError, match="lock|progress"):
+    with pytest.raises(CampaignArtifactError, match=r"lock|progress"):
         finalize_verified10_campaign(
             protocol,
             attempts,
@@ -579,7 +583,7 @@ def test_finalizer_recomputes_forged_model_copy_patch_digest(tmp_path: Path) -> 
             )
         )
     forged = predictions[0].model_copy(update={"model_patch": "forged"})
-    with pytest.raises(CampaignArtifactError, match="validation|patch digest"):
+    with pytest.raises(CampaignArtifactError, match=r"validation|patch digest"):
         finalize_verified10_campaign(
             protocol,
             attempts,
@@ -612,7 +616,7 @@ def test_finalizer_rejects_nonterminal_attempts(tmp_path: Path) -> None:
         )
     for status in (AttemptStatus.PLANNED, AttemptStatus.RUNNING):
         nonterminal = [attempts[0].model_copy(update={"status": status}), *attempts[1:]]
-        with pytest.raises(CampaignArtifactError, match="validation|terminal"):
+        with pytest.raises(CampaignArtifactError, match=r"validation|terminal"):
             finalize_verified10_campaign(
                 protocol,
                 nonterminal,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -12,8 +12,8 @@ import pytest
 from pydantic import ValidationError
 
 from agentforge.evaluation.swebench_prediction import (
-    SWEbenchPrediction,
     SWEbenchInstanceBinding,
+    SWEbenchPrediction,
     SWEbenchPredictionError,
     SWEbenchPredictionExporter,
     save_swebench_prediction,
@@ -252,7 +252,11 @@ def test_save_predictions_orders_shuffled_input_and_rejects_wrong_denominator(
         "instance-b",
     ]
     with pytest.raises(SWEbenchPredictionError, match="duplicate"):
-        save_swebench_predictions(output, predictions, expected_instance_ids=("instance-a", "instance-a"))
+        save_swebench_predictions(
+            output,
+            predictions,
+            expected_instance_ids=("instance-a", "instance-a"),
+        )
 
 
 def test_save_predictions_revalidates_model_copy_forgery(tmp_path: Path) -> None:
