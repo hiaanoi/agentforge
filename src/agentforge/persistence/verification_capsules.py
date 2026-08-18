@@ -105,6 +105,7 @@ class VerificationCapsuleBuilder:
         capsule_id = capsule_id or uuid4()
         staging = store / f".staging-{capsule_id}"
         published = store / str(capsule_id)
+        published_owned = False
         try:
             os.mkdir(staging, 0o700)
             source_target = staging / "source"
@@ -128,6 +129,7 @@ class VerificationCapsuleBuilder:
             if published.exists():
                 raise WorkspaceDigestError()
             os.rename(staging, published)
+            published_owned = True
             self._fsync_directory(store)
             self._revalidate_store(store, store_chain)
             capsule = VerificationCapsule(
@@ -147,9 +149,13 @@ class VerificationCapsuleBuilder:
             return capsule
         except WorkspaceDigestError:
             self._discard_staging(staging)
+            if published_owned:
+                self._discard_owned_tree(published)
             raise
         except (OSError, RuntimeError, UnicodeError, ValueError):
             self._discard_staging(staging)
+            if published_owned:
+                self._discard_owned_tree(published)
             raise WorkspaceDigestError() from None
 
     def verify(self, capsule: VerificationCapsule) -> None:
@@ -582,13 +588,40 @@ class VerificationCapsuleBuilder:
 
     @staticmethod
     def _discard_staging(staging: Path) -> None:
+        VerificationCapsuleBuilder._discard_owned_tree(staging)
+
+    @staticmethod
+    def _discard_owned_tree(root: Path) -> None:
         try:
-            staging_item = os.lstat(staging)
+            root_item = os.lstat(root)
         except FileNotFoundError:
             return
-        if not stat.S_ISDIR(staging_item.st_mode):
+        if not stat.S_ISDIR(root_item.st_mode):
+            try:
+                root.unlink()
+            except OSError:
+                pass
             return
-        for path in sorted(staging.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        try:
+            paths = sorted(root.rglob("*"), key=lambda item: len(item.parts))
+        except OSError:
+            paths = []
+        directories = [root]
+        for path in paths:
+            try:
+                item = os.lstat(path)
+            except OSError:
+                continue
+            if stat.S_ISDIR(item.st_mode):
+                directories.append(path)
+        for directory in directories:
+            try:
+                item = os.lstat(directory)
+                if stat.S_ISDIR(item.st_mode):
+                    VerificationCapsuleBuilder._chmod_no_follow(directory, 0o700)
+            except OSError:
+                continue
+        for path in reversed(paths):
             try:
                 item = os.lstat(path)
                 if stat.S_ISDIR(item.st_mode):
@@ -598,6 +631,6 @@ class VerificationCapsuleBuilder:
             except OSError:
                 continue
         try:
-            staging.rmdir()
+            root.rmdir()
         except OSError:
             pass

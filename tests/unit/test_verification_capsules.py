@@ -216,6 +216,36 @@ def test_capture_detects_source_mutation_during_single_pass_copy(
     assert changed
 
 
+def test_capture_discards_published_capsule_when_sealing_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, verifier, store = _roots(tmp_path)
+    capsule_id = uuid4()
+    builder = VerificationCapsuleBuilder(store)
+    original_seal = builder._seal_tree
+    seal_calls = 0
+
+    def fail_seal(root: Path) -> None:
+        nonlocal seal_calls
+        seal_calls += 1
+        if seal_calls == 2:
+            raise WorkspaceDigestError()
+        original_seal(root)
+
+    monkeypatch.setattr(builder, "_seal_tree", fail_seal)
+
+    with pytest.raises(WorkspaceDigestError):
+        builder.capture(
+            execution_id=uuid4(),
+            capsule_id=capsule_id,
+            source_root=source,
+            verifier_root=verifier,
+        )
+
+    assert not (store / str(capsule_id)).exists()
+    assert not any(path.name.startswith(".staging-") for path in store.iterdir())
+
+
 def test_sealed_mutation_is_detected_and_concurrent_captures_never_share_staging(
     tmp_path: Path,
 ) -> None:

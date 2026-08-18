@@ -28,7 +28,12 @@ from agentforge.application.runtime_factory import (
 )
 from agentforge.context.models import ContextPolicy
 from agentforge.domain.enums import ApprovalStatus
-from agentforge.domain.repair import BudgetProfile, RepairDifficulty, RepairTaskPolicy
+from agentforge.domain.repair import (
+    BudgetProfile,
+    RepairDifficulty,
+    RepairTaskPolicy,
+    fixed_budget,
+)
 from agentforge.domain.test_execution import TestProfile as DomainTestProfile
 from agentforge.evaluation.validators import WorkspaceDiffValidator
 from agentforge.models.domain import ModelBudget
@@ -52,6 +57,7 @@ from agentforge.tools.testing.profiles import TestProfileRegistry as ProfileRegi
 
 
 def _policy() -> RepairTaskPolicy:
+    budget = fixed_budget(BudgetProfile.BASIC)
     return RepairTaskPolicy(
         task_id="product-symlink-workspace",
         policy_version=1,
@@ -66,19 +72,26 @@ def _policy() -> RepairTaskPolicy:
         max_changed_files=1,
         max_total_changed_bytes=1024,
         max_single_file_changed_bytes=1024,
-        max_model_calls=1,
-        max_read_calls=1,
-        max_edit_attempts=1,
-        max_test_runs=1,
-        max_completion_corrections=0,
-        max_policy_violations=0,
-        max_wall_time_seconds=60,
         path_case_sensitive=True,
+        **budget.model_dump(),
     )
 
 
+def test_product_symlink_policy_uses_the_exact_basic_budget() -> None:
+    budget = fixed_budget(BudgetProfile.BASIC)
+    policy = _policy()
+    assert {
+        name: getattr(policy, name)
+        for name in type(budget).model_fields
+    } == budget.model_dump()
+
+
 class _PassingSupervisor:
+    def __init__(self, launched_profiles: list[DomainTestProfile]) -> None:
+        self._launched_profiles = launched_profiles
+
     def run(self, profile: DomainTestProfile) -> SupervisorOutcome:
+        self._launched_profiles.append(profile)
         return SupervisorOutcome(
             status=SupervisorStatus.EXITED,
             root_pid=None,
@@ -97,8 +110,12 @@ class _PassingSupervisor:
         return True
 
 
-def _passing_supervisor_factory() -> ProcessTreeSupervisor:
-    return _PassingSupervisor()
+class _RecordingSupervisorFactory:
+    def __init__(self) -> None:
+        self.launched_profiles: list[DomainTestProfile] = []
+
+    def __call__(self) -> ProcessTreeSupervisor:
+        return _PassingSupervisor(self.launched_profiles)
 
 
 async def _collect(stream: AsyncIterator[object]) -> list[object]:
@@ -107,7 +124,7 @@ async def _collect(stream: AsyncIterator[object]) -> list[object]:
 
 def _product_runtime(
     tmp_path: Path, workspace: Path, verifier: Path
-) -> tuple[AgentApplication, Database, RuntimeComponents]:
+) -> tuple[AgentApplication, Database, RuntimeComponents, _RecordingSupervisorFactory]:
     config = ProductConfigLoader(user_root=tmp_path / "user").load(
         workspace,
         cli={
@@ -162,6 +179,7 @@ def _product_runtime(
         ]
     )
     workflow = RepairWorkflow(database)
+    supervisor_factory = _RecordingSupervisorFactory()
     request = RuntimeAssemblyRequest(
         database=database,
         workspace=workspace,
@@ -173,7 +191,7 @@ def _product_runtime(
         events=LegacyEvaluatorEventRepository(database),
         repair_workflow=workflow,
         max_output_chars=20_000,
-        supervisor_factory=_passing_supervisor_factory,
+        supervisor_factory=supervisor_factory,
         supervisor_identity=SupervisorIdentity(
             implementation="tests.product_symlink_workspace.PassingSupervisor",
             implementation_version="1",
@@ -198,6 +216,7 @@ def _product_runtime(
         ),
         database,
         components,
+        supervisor_factory,
     )
 
 
@@ -278,7 +297,9 @@ async def test_product_runtime_executes_final_capsule_after_regular_mutation(
     initial = capture.capture(
         workspace, task_id="product-symlink-workspace", command_id=uuid4()
     )
-    app, database, components = _product_runtime(tmp_path, workspace, verifier)
+    app, database, components, supervisor_factory = _product_runtime(
+        tmp_path, workspace, verifier
+    )
     try:
         started = await _collect(
             app.stream(StartRun(command_id=uuid4(), task="repair", workspace=workspace))
@@ -315,6 +336,11 @@ async def test_product_runtime_executes_final_capsule_after_regular_mutation(
         executions = components.test_coordinator.list_executions(run_id)
         assert len(executions) == 1
         assert executions[0].capsule_state is VerificationCapsuleState.SEALED
+        assert len(supervisor_factory.launched_profiles) == 1
+        launched = supervisor_factory.launched_profiles[0]
+        capsule_source = Path(launched.cwd)
+        assert capsule_source.name == "source"
+        assert Path(launched.argv[-1]) == capsule_source.parent / "verifier"
         assert app.query(RunDetails(run_id=run_id)).outcome_status.value == "VERIFIED"
         for name, link_target in links.items():
             assert os.readlink(workspace / name) == link_target
