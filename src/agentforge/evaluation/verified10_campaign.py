@@ -552,7 +552,7 @@ def finalize_verified10_campaign(
         prediction_target, ledger_target = _ensure_distinct_artifacts(
             prediction_path, ledger_path
         )
-        lock_path, lock_fd = _acquire_finalize_lock(prediction_target)
+        lock_handles = _acquire_finalize_locks(prediction_target, ledger_target)
         try:
             prediction_target = _prepare_artifact_target(prediction_target, reject_existing=True)
             ledger_target = _prepare_artifact_target(ledger_target, reject_existing=True)
@@ -562,7 +562,8 @@ def finalize_verified10_campaign(
             prediction_digest = hashlib.sha256(prediction_target.read_bytes()).hexdigest()
             ledger_digest = hashlib.sha256(ledger_target.read_bytes()).hexdigest()
         finally:
-            _release_finalize_lock(lock_path, lock_fd)
+            for lock_path, lock_fd in reversed(lock_handles):
+                _release_finalize_lock(lock_path, lock_fd)
     except CampaignArtifactError:
         raise
     except (OSError, SWEbenchPredictionError, TypeError, ValueError):
@@ -667,6 +668,26 @@ def _acquire_finalize_lock(public_target: Path) -> tuple[Path, int]:
         ) from None
     except OSError:
         raise CampaignArtifactError("Unable to acquire campaign finalization lock") from None
+
+
+def _acquire_finalize_locks(
+    prediction_target: Path, ledger_target: Path
+) -> tuple[tuple[Path, int], ...]:
+    targets = sorted(
+        (prediction_target, ledger_target),
+        key=lambda target: os.path.normcase(
+            str(target.with_name(f".{target.name}.finalize.lock"))
+        ),
+    )
+    acquired: list[tuple[Path, int]] = []
+    try:
+        for target in targets:
+            acquired.append(_acquire_finalize_lock(target))
+        return tuple(acquired)
+    except CampaignArtifactError:
+        for lock_path, lock_fd in reversed(acquired):
+            _release_finalize_lock(lock_path, lock_fd)
+        raise
 
 
 def _release_finalize_lock(lock_path: Path, lock_fd: int) -> None:

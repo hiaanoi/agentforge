@@ -448,8 +448,9 @@ def test_finalizer_preflights_ledger_parent_before_public_publish(tmp_path: Path
     assert not (tmp_path / "locked-ledger.json").exists()
 
 
+@pytest.mark.parametrize("conflict", ["public", "ledger"])
 def test_concurrent_finalizers_have_one_publication_winner(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, conflict: str
 ) -> None:
     protocol = load_verified10_protocol(PROTOCOL_PATH)
     predictions = []
@@ -471,32 +472,46 @@ def test_concurrent_finalizers_have_one_publication_winner(
                 prediction_patch_sha256=prediction.patch_sha256,
             )
         )
-    public_path = tmp_path / "concurrent.json"
-    ledger_path = tmp_path / "concurrent-ledger.json"
+    public_paths = (
+        [tmp_path / "concurrent.json"] * 2
+        if conflict == "public"
+        else [tmp_path / "concurrent-0.json", tmp_path / "concurrent-1.json"]
+    )
+    ledger_paths = (
+        [tmp_path / "concurrent-ledger-0.json", tmp_path / "concurrent-ledger-1.json"]
+        if conflict == "public"
+        else [tmp_path / "concurrent-ledger.json"] * 2
+    )
     barrier = threading.Barrier(2)
-    acquire = campaign_module._acquire_finalize_lock
+    acquire = campaign_module._acquire_finalize_locks
 
-    def synchronized_acquire(path: Path) -> tuple[Path, int]:
+    def synchronized_acquire(
+        public_target: Path, ledger_target: Path
+    ) -> tuple[tuple[Path, int], ...]:
         barrier.wait(timeout=5)
-        return acquire(path)
+        return acquire(public_target, ledger_target)
 
-    monkeypatch.setattr(campaign_module, "_acquire_finalize_lock", synchronized_acquire)
+    monkeypatch.setattr(campaign_module, "_acquire_finalize_locks", synchronized_acquire)
 
-    def run() -> str:
+    def run(index: int) -> str:
         try:
             finalize_verified10_campaign(
-                protocol, attempts, predictions, public_path, ledger_path
+                protocol, attempts, predictions, public_paths[index], ledger_paths[index]
             )
         except CampaignArtifactError:
             return "failed"
         return "ok"
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        outcomes = sorted(pool.map(lambda _: run(), range(2)))
+        outcomes = sorted(pool.map(run, range(2)))
 
     assert outcomes == ["failed", "ok"]
-    assert public_path.is_file() and ledger_path.is_file()
-    assert not public_path.with_name(f".{public_path.name}.finalize.lock").exists()
+    assert sum(path.is_file() for path in set(public_paths)) == 1
+    assert sum(path.is_file() for path in set(ledger_paths)) == 1
+    assert all(
+        not path.with_name(f".{path.name}.finalize.lock").exists()
+        for path in set(public_paths + ledger_paths)
+    )
     assert not list(tmp_path.glob(".*.tmp"))
 
 
