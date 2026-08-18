@@ -92,6 +92,14 @@ def test_protocol_rejects_legal_but_drifted_budget_source_url() -> None:
         Verified10Protocol.model_validate(payload)
 
 
+def test_protocol_rejects_legal_but_wrong_prior_artifact_sha256() -> None:
+    payload = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
+    payload["prior_baseline"]["artifacts"]["selection_sha256"] = "d" * 64
+
+    with pytest.raises(ValidationError):
+        Verified10Protocol.model_validate(payload)
+
+
 def test_public_projection_rejects_private_generation_fields() -> None:
     row = {
         "instance_id": EXPECTED_INSTANCE_IDS[0],

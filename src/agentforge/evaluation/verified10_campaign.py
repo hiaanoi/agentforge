@@ -170,6 +170,24 @@ _SWE_AGENT_MODELS_URL = (
     "https://github.com/princeton-nlp/SWE-agent/blob/main/sweagent/agent/models.py"
 )
 _OPENHANDS_CONFIG_URL = "https://github.com/OpenHands/OpenHands/blob/main/config.template.toml"
+_FROZEN_PRIOR_ARTIFACT_HASHES = {
+    "selection_sha256": "9c385f13580c05e3cb5590e2abb43b278fa8ed99597315d7010f6953785ca9c0",
+    "experiment_protocol_sha256": (
+        "b511f1c6c7974f7b36ed1eb4ba9ee7435a6dcf21211b7ed5e879fe9fcc06c62a"
+    ),
+    "agentforge_predictions_sha256": (
+        "2e98e29e37f5c42598fe055c1db5972a44bec9d5d68ad3721cf9e00c40efaf48"
+    ),
+    "mini_swe_agent_predictions_sha256": (
+        "42fcc0377abdb3538a12ea814a862b9ddd46dfb69fef544058a817134373e1fb"
+    ),
+    "agentforge_official_report_sha256": (
+        "a9c19d540f1170d9026161c4bdf997c1b487bd000208f3fe8b2044b5ddea0243"
+    ),
+    "mini_swe_agent_official_report_sha256": (
+        "9d6274d5ad446dde3cf000276466da8a00bd0203e01fffdc8ebe7a7a0ca48c9f"
+    ),
+}
 
 
 def canonical_digest(value: object) -> str:
@@ -273,6 +291,12 @@ class PriorArtifactHashes(_FrozenModel):
     mini_swe_agent_predictions_sha256: str = Field(pattern=SHA256_PATTERN)
     agentforge_official_report_sha256: str = Field(pattern=SHA256_PATTERN)
     mini_swe_agent_official_report_sha256: str = Field(pattern=SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_frozen_artifacts(self) -> Self:
+        if self.model_dump(mode="json") != _FROZEN_PRIOR_ARTIFACT_HASHES:
+            raise ValueError("prior artifact SHA256 values do not match old evidence bytes")
+        return self
 
 
 class Prior14CallBaseline(_FrozenModel):
