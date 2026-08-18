@@ -320,6 +320,15 @@ def test_runtime_assembly_accepts_all_components_bound_to_same_database(
     assert components.common_binding_digest
 
 
+def test_runtime_assembly_shares_one_digester_with_mutation_and_verification(
+    tmp_path: Path,
+) -> None:
+    components = RuntimeComponentFactory().build(_request(tmp_path))
+
+    assert components.mutation_coordinator._digester is components.test_coordinator._digester
+    assert components.test_coordinator._capsules._digester is components.test_coordinator._digester
+
+
 class _EquivalentProviderSurface:
     @property
     def name(self) -> str:

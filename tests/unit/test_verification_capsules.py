@@ -101,20 +101,51 @@ def test_store_rejects_linked_ancestor(tmp_path: Path) -> None:
         )
 
 
-def test_capture_rejects_links_and_partial_staging_is_never_executable(
+def test_capture_preserves_safe_relative_symlink_and_detects_target_tampering(
     tmp_path: Path,
 ) -> None:
     source, verifier, store = _roots(tmp_path)
-    link = source / "linked.py"
+    source_link = source / "pkg" / "linked.py"
+    verifier_link = verifier / "linked_test.py"
     try:
-        link.symlink_to(source / "pkg" / "module.py")
+        source_link.symlink_to("module.py")
+        verifier_link.symlink_to("test_hidden.py")
     except OSError as exc:
         pytest.skip(f"Symlinks are unavailable on this platform: {exc}")
 
     builder = VerificationCapsuleBuilder(store)
+    capsule = builder.capture(
+        execution_id=uuid4(), source_root=source, verifier_root=verifier
+    )
+
+    copied_source_link = capsule.source_root / "pkg" / "linked.py"
+    copied_verifier_link = capsule.verifier_root / "linked_test.py"
+    assert os.path.islink(copied_source_link)
+    assert os.path.islink(copied_verifier_link)
+    assert os.readlink(copied_source_link) == "module.py"
+    assert os.readlink(copied_verifier_link) == "test_hidden.py"
+    builder.verify(capsule)
+
+    copied_source_link.unlink()
+    copied_source_link.symlink_to("different.py")
+    with pytest.raises(WorkspaceDigestError):
+        builder.verify(capsule)
+
+
+@pytest.mark.parametrize("target", ["/outside.py", "../outside.py"])
+def test_capture_rejects_absolute_or_escaping_symlink_targets(
+    tmp_path: Path, target: str
+) -> None:
+    source, verifier, store = _roots(tmp_path)
+    link = source / "linked.py"
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"Symlinks are unavailable on this platform: {exc}")
+
     execution_id = uuid4()
     with pytest.raises(WorkspaceDigestError):
-        builder.capture(
+        VerificationCapsuleBuilder(store).capture(
             execution_id=execution_id, source_root=source, verifier_root=verifier
         )
 
@@ -171,6 +202,31 @@ def test_sealed_mutation_is_detected_and_concurrent_captures_never_share_staging
     captured.write_bytes(b"tampered\n")
     with pytest.raises(WorkspaceDigestError):
         builder.verify(capsules[0])
+
+
+def test_seal_requests_no_follow_chmod_and_staging_cleanup_never_chmods(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "sealed"
+    root.mkdir()
+    (root / "child.py").write_text("value = 1\n", encoding="utf-8")
+    chmod_calls: list[tuple[Path, int, bool]] = []
+
+    def chmod_no_follow(path: Path, mode: int, *, follow_symlinks: bool) -> None:
+        chmod_calls.append((Path(path), mode, follow_symlinks))
+
+    monkeypatch.setattr(os, "chmod", chmod_no_follow)
+    monkeypatch.setattr(os, "supports_follow_symlinks", {chmod_no_follow})
+    VerificationCapsuleBuilder._seal_tree(root)
+
+    assert chmod_calls
+    assert all(not follow_symlinks for _, _, follow_symlinks in chmod_calls)
+
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "partial.py").write_text("partial\n", encoding="utf-8")
+    VerificationCapsuleBuilder._discard_staging(staging)
+    assert not staging.exists()
 
 
 def test_launch_profile_expands_only_capsule_mount_references(tmp_path: Path) -> None:
