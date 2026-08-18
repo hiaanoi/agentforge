@@ -1,4 +1,3 @@
-# ruff: noqa: E501, E701, E702
 """Frozen, public-only protocol for the Verified-10 pass-one rerun.
 
 This module deliberately contains protocol validation and dataset projection only.  It
@@ -10,13 +9,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import subprocess
-import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal, Protocol, Self
+from typing import Literal, Self
 from uuid import uuid4
 
 from pydantic import (
@@ -29,10 +25,8 @@ from pydantic import (
     model_validator,
 )
 
-from agentforge.application.product_workspace import ProductWorkspaceCapture
 from agentforge.evaluation.protocol import canonical_digest
 from agentforge.evaluation.swebench_prediction import (
-    SWEbenchInstanceBinding,
     SWEbenchPrediction,
     SWEbenchPredictionError,
     serialize_swebench_predictions,
@@ -48,9 +42,7 @@ FORBIDDEN_GENERATION_FIELDS = (
     "patch",
     "test_patch",
 )
-PUBLIC_ROW_FIELDS = frozenset(
-    {"instance_id", "repo", "base_commit", "problem_statement"}
-)
+PUBLIC_ROW_FIELDS = frozenset({"instance_id", "repo", "base_commit", "problem_statement"})
 
 _FROZEN_TASK_BINDINGS = (
     (
@@ -127,9 +119,7 @@ _FROZEN_TASK_BINDINGS = (
 EXPECTED_INSTANCE_IDS = tuple(binding[1] for binding in _FROZEN_TASK_BINDINGS)
 
 _FROZEN_DATASET_FINGERPRINT = "1fdfd21ba2621130"
-_FROZEN_SOURCE_SELECTION_SHA256 = (
-    "9c385f13580c05e3cb5590e2abb43b278fa8ed99597315d7010f6953785ca9c0"
-)
+_FROZEN_SOURCE_SELECTION_SHA256 = "9c385f13580c05e3cb5590e2abb43b278fa8ed99597315d7010f6953785ca9c0"
 _MINI_SWE_AGENT_CONFIG_URL = (
     "https://github.com/SWE-agent/mini-swe-agent/blob/main/"
     "src/minisweagent/config/benchmarks/swebench.yaml"
@@ -196,6 +186,10 @@ class AttemptFailureClass(StrEnum):
     COMPATIBILITY = "COMPATIBILITY_FAILED"
     MODEL_FAILED = "MODEL_FAILED"
     MODEL = "MODEL_FAILED"
+    POLICY_FAILED = "POLICY_FAILED"
+    RUNTIME_FAILED = "RUNTIME_FAILED"
+    INFRASTRUCTURE_FAILED = "INFRASTRUCTURE_FAILED"
+    INTERRUPTED = "INTERRUPTED"
     TIMEOUT = "TIMEOUT"
 
 
@@ -383,15 +377,19 @@ class BenchmarkAttemptRecord(_FrozenModel):
     attempt_index: Literal[1]
     status: AttemptStatus
     failure_class: AttemptFailureClass = AttemptFailureClass.NONE
-    model_calls: int = Field(default=0, ge=0)
-    steps: int = Field(default=0, ge=0)
-    provider_prompt_tokens: int = Field(default=0, ge=0)
-    provider_completion_tokens: int = Field(default=0, ge=0)
-    provider_total_tokens: int = Field(default=0, ge=0)
-    approval_count: int = Field(default=0, ge=0)
-    edit_count: int = Field(default=0, ge=0)
-    test_count: int = Field(default=0, ge=0)
-    wall_time_seconds: float = Field(default=0.0, ge=0.0)
+    model_calls: int | None = Field(default=None, ge=0)
+    steps: int | None = Field(default=None, ge=0)
+    provider_prompt_tokens: int | None = Field(default=None, ge=0)
+    provider_completion_tokens: int | None = Field(default=None, ge=0)
+    provider_total_tokens: int | None = Field(default=None, ge=0)
+    approval_count: int | None = Field(default=None, ge=0)
+    edit_count: int | None = Field(default=None, ge=0)
+    test_count: int | None = Field(default=None, ge=0)
+    event_count: int | None = Field(default=None, ge=0)
+    wall_time_seconds: float | None = Field(default=None, ge=0.0)
+    terminal_reason: str | None = Field(default=None, max_length=500)
+    telemetry_unavailable: tuple[str, ...] = ()
+    provider_capabilities: Mapping[str, str] = Field(default_factory=dict)
     trajectory_path: str | None = Field(default=None, max_length=500)
     trajectory_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
     prediction_patch_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
@@ -405,10 +403,10 @@ class BenchmarkAttemptRecord(_FrozenModel):
             and self.failure_class is not AttemptFailureClass.NONE
         ):
             raise ValueError("non-terminal attempts must not have a failure class")
-        if (
-            self.status is AttemptStatus.COMPLETED
-            and self.failure_class not in {AttemptFailureClass.NONE, AttemptFailureClass.EMPTY}
-        ):
+        if self.status is AttemptStatus.COMPLETED and self.failure_class not in {
+            AttemptFailureClass.NONE,
+            AttemptFailureClass.EMPTY,
+        }:
             raise ValueError("COMPLETED attempts only allow NONE or EMPTY failure class")
         return self
 
@@ -424,6 +422,11 @@ class BenchmarkAttemptRecord(_FrozenModel):
             raise ValueError("trajectory_path must not contain absolute or parent paths")
         return normalized
 
+    @field_validator("telemetry_unavailable", mode="before")
+    @classmethod
+    def normalize_unavailable(cls, value: object) -> object:
+        return tuple(value) if isinstance(value, list) else value
+
 
 class Verified10ProtocolError(ValueError):
     """Stable domain error for every protocol loading failure."""
@@ -431,6 +434,10 @@ class Verified10ProtocolError(ValueError):
 
 class CampaignArtifactError(Verified10ProtocolError):
     """Stable domain error for campaign artifact loading and finalization."""
+
+
+class CampaignExecutionError(Verified10ProtocolError):
+    """Stable, non-secret error exposed by executable campaign boundaries."""
 
 
 class CampaignArtifactResult(_FrozenModel):
@@ -506,8 +513,7 @@ def finalize_verified10_campaign(
     if len(arms) != 1 or (arm is not None and arms != {arm}):
         raise CampaignArtifactError("Campaign attempts contain cross-arm records")
     if any(
-        record.status not in {AttemptStatus.COMPLETED, AttemptStatus.FAILED}
-        for record in attempts
+        record.status not in {AttemptStatus.COMPLETED, AttemptStatus.FAILED} for record in attempts
     ):
         raise CampaignArtifactError("Campaign attempts must have terminal status")
     attempt_ids = [record.instance_id for record in attempts]
@@ -555,9 +561,7 @@ def finalize_verified10_campaign(
         )
         ordered_attempts = tuple(by_attempt[instance_id] for instance_id in expected_ids)
         ledger_payload = _serialize_attempt_ledger(ordered_attempts)
-        prediction_target, ledger_target = _ensure_distinct_artifacts(
-            prediction_path, ledger_path
-        )
+        prediction_target, ledger_target = _ensure_distinct_artifacts(prediction_path, ledger_path)
         lock_handles = _acquire_finalize_locks(prediction_target, ledger_target)
         try:
             prediction_target = _prepare_artifact_target(prediction_target, reject_existing=True)
@@ -681,9 +685,7 @@ def _acquire_finalize_locks(
 ) -> tuple[tuple[Path, int], ...]:
     targets = sorted(
         (prediction_target, ledger_target),
-        key=lambda target: os.path.normcase(
-            str(target.with_name(f".{target.name}.finalize.lock"))
-        ),
+        key=lambda target: os.path.normcase(str(target.with_name(f".{target.name}.finalize.lock"))),
     )
     acquired: list[tuple[Path, int]] = []
     try:
@@ -726,9 +728,7 @@ def project_public_task(row: Mapping[str, object]) -> dict[str, str]:
     return projected
 
 
-def validate_public_task(
-    row: Mapping[str, object], task: Verified10Task
-) -> dict[str, str]:
+def validate_public_task(row: Mapping[str, object], task: Verified10Task) -> dict[str, str]:
     """Validate one public runtime row against one frozen task binding."""
 
     projected = project_public_task(row)
@@ -765,392 +765,25 @@ def load_verified10_protocol(path: str | Path) -> Verified10Protocol:
         raise Verified10ProtocolError("Unable to load Verified-10 protocol") from None
 
 
-# The campaign runner intentionally depends on this narrow seam rather than
-# subprocess directly.  That makes preparation and both arms replayable in
-# tests without a registry, Docker daemon, or model credential.
-@dataclass(frozen=True, slots=True)
-class CampaignCommand:
-    argv: tuple[str, ...]
-    cwd: Path | None = None
-    environment: Mapping[str, str] | None = None
-    timeout_seconds: int | None = None
+_RUNNER_EXPORTS = frozenset(
+    {
+        "CampaignCommand",
+        "CampaignCommandResult",
+        "CampaignState",
+        "CommandRunner",
+        "MiniSourceVerifier",
+        "SubprocessCommandRunner",
+        "Verified10Campaign",
+        "swebench_image_name",
+    }
+)
 
 
-@dataclass(frozen=True, slots=True)
-class CampaignCommandResult:
-    returncode: int
-    stdout: str
-    stderr: str
+def __getattr__(name: str) -> object:
+    """Lazily preserve the historical runner import surface without a cycle."""
 
+    if name in _RUNNER_EXPORTS:
+        from agentforge.evaluation import verified10_runner
 
-class CommandRunner(Protocol):
-    def run(self, command: CampaignCommand) -> CampaignCommandResult: ...
-
-
-class SubprocessCommandRunner:
-    """The real runner; callers may replace it with a local fake in tests."""
-
-    def run(self, command: CampaignCommand) -> CampaignCommandResult:
-        completed = subprocess.run(
-            command.argv,
-            cwd=command.cwd,
-            env=dict(command.environment) if command.environment is not None else None,
-            capture_output=True,
-            text=True,
-            timeout=command.timeout_seconds,
-            check=False,
-        )
-        return CampaignCommandResult(completed.returncode, completed.stdout, completed.stderr)
-
-
-class CampaignExecutionError(Verified10ProtocolError):
-    """Stable, non-secret error exposed by the campaign CLI."""
-
-
-class _CampaignAttempt(_FrozenModel):
-    instance_id: str
-    attempt_index: Literal[1]
-    status: AttemptStatus
-    failure_class: AttemptFailureClass
-    model_patch: str = ""
-    run_id: str | None = None
-    model_calls: int = Field(default=0, ge=0)
-    steps: int = Field(default=0, ge=0)
-    wall_time_seconds: float = Field(default=0, ge=0)
-    trajectory_path: str | None = None
-    trajectory_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
-
-
-class _WorkspaceRecord(_FrozenModel):
-    path: str
-    image: str
-    image_digest: str
-    workspace_digest: str = Field(pattern=SHA256_PATTERN)
-    symlink_count: int = Field(ge=0)
-    disk_bytes: int = Field(ge=0)
-
-
-class _CampaignState(_FrozenModel):
-    schema_version: Literal[1] = 1
-    protocol_digest: str = Field(pattern=SHA256_PATTERN)
-    prepared: bool = False
-    admission_count: int = Field(default=0, ge=0, le=10)
-    workspaces: dict[str, _WorkspaceRecord] = Field(default_factory=dict)
-    attempts: dict[str, tuple[_CampaignAttempt, ...]] = Field(default_factory=dict)
-    finalized_arms: tuple[str, ...] = ()
-
-
-def swebench_image_name(instance_id: str) -> str:
-    """Official SWE-bench evaluation image mapping, with no registry lookup."""
-
-    if not isinstance(instance_id, str) or not instance_id:
-        raise CampaignExecutionError("Invalid SWE-bench instance identifier")
-    return "docker.io/swebench/sweb.eval.x86_64." + instance_id.replace("__", "_1776_").lower() + ":latest"
-
-
-def _relative(root: Path, path: Path) -> str:
-    try:
-        value = path.resolve(strict=False).relative_to(root.resolve(strict=False)).as_posix()
-    except ValueError:
-        raise CampaignExecutionError("Campaign artifact path escaped output directory") from None
-    if not value or value.startswith("../"):
-        raise CampaignExecutionError("Campaign artifact path is invalid")
-    return value
-
-
-class Verified10Campaign:
-    """Durable matched-run orchestration around public-only command specs."""
-
-    def __init__(
-        self,
-        protocol_path: str | Path,
-        output_dir: str | Path,
-        *,
-        runner: CommandRunner | None = None,
-    ) -> None:
-        self.protocol_path = Path(protocol_path).resolve(strict=True)
-        self.protocol = load_verified10_protocol(self.protocol_path)
-        self.root = self._safe_root(Path(output_dir))
-        self.runner = runner or SubprocessCommandRunner()
-
-    @staticmethod
-    def _safe_root(requested: Path) -> Path:
-        if not requested.is_absolute():
-            requested = requested.absolute()
-        if any(part in {"", ".", ".."} for part in requested.parts):
-            raise CampaignExecutionError("Output directory path is unsafe")
-        current = Path(requested.anchor)
-        for part in requested.parts[1:]:
-            current /= part
-            if current.exists() and current.is_symlink():
-                raise CampaignExecutionError("Output directory path is unsafe")
-        return requested
-
-    @property
-    def _state_path(self) -> Path:
-        return self.root / "campaign-state.json"
-
-    def _bootstrap_or_load(self) -> _CampaignState:
-        if not self.root.exists():
-            self.root.mkdir(parents=True, exist_ok=False)
-            protocol_copy = self.root / "protocol.json"
-            self._atomic(protocol_copy, self.protocol_path.read_bytes())
-            state = _CampaignState(protocol_digest=self.protocol.protocol_digest)
-            self._save(state)
-            return state
-        return self._load()
-
-    def _load(self) -> _CampaignState:
-        try:
-            copied = load_verified10_protocol(self.root / "protocol.json")
-            state = _CampaignState.model_validate_json(self._state_path.read_bytes())
-        except (OSError, ValueError, ValidationError, Verified10ProtocolError):
-            raise CampaignExecutionError("Campaign state is missing or invalid") from None
-        if copied.protocol_digest != self.protocol.protocol_digest or state.protocol_digest != self.protocol.protocol_digest:
-            raise CampaignExecutionError("Campaign protocol digest mismatch")
-        return state
-
-    def _save(self, state: _CampaignState) -> None:
-        self._atomic(self._state_path, state.model_dump_json(indent=2).encode("utf-8") + b"\n")
-
-    @staticmethod
-    def _atomic(path: Path, payload: bytes) -> None:
-        temporary = path.with_name("." + path.name + ".tmp")
-        try:
-            temporary.write_bytes(payload)
-            os.replace(temporary, path)
-        except OSError:
-            temporary.unlink(missing_ok=True)
-            raise CampaignExecutionError("Unable to write campaign artifact") from None
-
-    def _run(self, command: CampaignCommand, *, label: str) -> CampaignCommandResult:
-        try:
-            result = self.runner.run(command)
-        except (OSError, subprocess.SubprocessError, TimeoutError):
-            raise CampaignExecutionError(label + " command failed") from None
-        if result.returncode != 0:
-            raise CampaignExecutionError(label + " command failed")
-        return result
-
-    @staticmethod
-    def _dataset_command() -> CampaignCommand:
-        # The output deliberately contains only the public projection; the
-        # runner never receives a request for tests, hints, or gold patches.
-        script = (
-            "import json; from datasets import load_dataset; "
-            "d=load_dataset('princeton-nlp/SWE-bench_Verified', split='test'); "
-            "print(json.dumps([{k:r[k] for k in ('instance_id','repo','base_commit','problem_statement')} for r in d]))"
-        )
-        return CampaignCommand(("python", "-c", script), environment={"HF_ENDPOINT": os.environ.get("HF_ENDPOINT", "https://huggingface.co")}, timeout_seconds=600)
-
-    def prepare(self) -> None:
-        state = self._bootstrap_or_load()
-        if state.prepared:
-            return
-        try:
-            rows = json.loads(self._run(self._dataset_command(), label="dataset").stdout)
-            validate_public_dataset_rows(rows, self.protocol)
-        except (json.JSONDecodeError, TypeError, ValueError, Verified10ProtocolError):
-            raise CampaignExecutionError("Public Verified dataset validation failed") from None
-        self._run(CampaignCommand(("docker", "version", "--format", "{{json .}}")), label="docker")
-        records: dict[str, _WorkspaceRecord] = {}
-        for task in self.protocol.tasks:
-            image = swebench_image_name(task.instance_id)
-            inspected = self._run(CampaignCommand(("docker", "image", "inspect", image, "--format", "{{index .RepoDigests 0}}")), label="docker image")
-            digest = inspected.stdout.strip()
-            if "@sha256:" not in digest:
-                self._run(CampaignCommand(("docker", "pull", image), timeout_seconds=1800), label="docker pull")
-                digest = self._run(CampaignCommand(("docker", "image", "inspect", image, "--format", "{{index .RepoDigests 0}}")), label="docker image").stdout.strip()
-            if "@sha256:" not in digest:
-                raise CampaignExecutionError("Docker image digest is unavailable")
-            for arm in BenchmarkArm:
-                workspace = self.root / "workspaces" / arm.value.lower() / task.instance_id
-                workspace.parent.mkdir(parents=True, exist_ok=True)
-                created = self._run(CampaignCommand(("docker", "create", image)), label="docker create").stdout.strip()
-                if not created:
-                    raise CampaignExecutionError("Docker create returned no container")
-                try:
-                    self._run(CampaignCommand(("docker", "cp", created + ":/testbed/.", str(workspace))), label="docker copy")
-                finally:
-                    # Removal is best effort only after a successful copy; a
-                    # failed cleanup must not change the materialized record.
-                    try:
-                        self.runner.run(CampaignCommand(("docker", "rm", created)))
-                    except (OSError, subprocess.SubprocessError):
-                        pass
-                head = self._run(CampaignCommand(("git", "-C", str(workspace), "rev-parse", "HEAD")), label="git").stdout.strip()
-                if head != task.base_commit:
-                    raise CampaignExecutionError("Materialized workspace base commit mismatch")
-                capture = ProductWorkspaceCapture().capture(workspace, task_id=task.instance_id, command_id=uuid4())
-                files = capture.baseline.files
-                records[arm.value + ":" + task.instance_id] = _WorkspaceRecord(
-                    path=_relative(self.root, workspace), image=image, image_digest=digest,
-                    workspace_digest=capture.baseline.root_digest,
-                    symlink_count=sum(item.is_symlink for item in files),
-                    disk_bytes=sum(item.size_bytes for item in files),
-                )
-        state = state.model_copy(update={"prepared": True, "admission_count": len(self.protocol.tasks), "workspaces": records})
-        self._save(state)
-
-    def _require_prepared(self, state: _CampaignState) -> None:
-        if not state.prepared or state.admission_count != 10 or len(state.workspaces) != 20:
-            raise CampaignExecutionError("Campaign is not admitted; run prepare successfully first")
-
-    def _records(self, state: _CampaignState, arm: BenchmarkArm) -> dict[str, _CampaignAttempt]:
-        records = state.attempts.get(arm.value, ())
-        return {record.instance_id: record for record in records}
-
-    def run_agentforge(self, *, recover_running: bool = False, retry_failed: bool = False) -> None:
-        self._run_arm(BenchmarkArm.AGENTFORGE, recover_running=recover_running, retry_failed=retry_failed, mini_root=None)
-
-    def run_mini(self, *, mini_root: str | Path, recover_running: bool = False, retry_failed: bool = False) -> None:
-        self._run_arm(BenchmarkArm.MINI_SWE_AGENT, recover_running=recover_running, retry_failed=retry_failed, mini_root=Path(mini_root))
-
-    def _run_arm(self, arm: BenchmarkArm, *, recover_running: bool, retry_failed: bool, mini_root: Path | None) -> None:
-        state = self._load(); self._require_prepared(state)
-        if arm is BenchmarkArm.AGENTFORGE and state.admission_count != 10:
-            raise CampaignExecutionError("AgentForge admission gate failed")
-        records = self._records(state, arm)
-        changed = False
-        for task in self.protocol.tasks:
-            existing = records.get(task.instance_id)
-            if existing is not None and existing.status in {AttemptStatus.COMPLETED, AttemptStatus.FAILED}:
-                if retry_failed and existing.status is AttemptStatus.FAILED:
-                    raise CampaignExecutionError("Protocol permits only one model attempt")
-                continue
-            if existing is not None and existing.status is AttemptStatus.RUNNING:
-                if not recover_running:
-                    raise CampaignExecutionError("RUNNING attempt requires --recover-running")
-                records[task.instance_id] = existing.model_copy(update={"status": AttemptStatus.FAILED, "failure_class": AttemptFailureClass.COMPATIBILITY_FAILED})
-                changed = True
-                continue
-            records[task.instance_id] = _CampaignAttempt(instance_id=task.instance_id, attempt_index=1, status=AttemptStatus.RUNNING, failure_class=AttemptFailureClass.NONE)
-            self._replace_records(state, arm, records)
-            state = self._load()
-            try:
-                attempt = self._execute_attempt(arm, task, state, mini_root)
-            except CampaignExecutionError:
-                attempt = _CampaignAttempt(instance_id=task.instance_id, attempt_index=1, status=AttemptStatus.FAILED, failure_class=AttemptFailureClass.COMPATIBILITY_FAILED)
-            records[task.instance_id] = attempt; changed = True
-            self._replace_records(state, arm, records); state = self._load()
-        if changed:
-            self._replace_records(state, arm, records)
-
-    def _replace_records(self, state: _CampaignState, arm: BenchmarkArm, records: Mapping[str, _CampaignAttempt]) -> None:
-        attempts = dict(state.attempts)
-        attempts[arm.value] = tuple(records[task.instance_id] for task in self.protocol.tasks if task.instance_id in records)
-        self._save(state.model_copy(update={"attempts": attempts}))
-
-    def _execute_attempt(self, arm: BenchmarkArm, task: Verified10Task, state: _CampaignState, mini_root: Path | None) -> _CampaignAttempt:
-        record = state.workspaces[arm.value + ":" + task.instance_id]
-        workspace = self.root / record.path
-        if arm is BenchmarkArm.MINI_SWE_AGENT:
-            if mini_root is None:
-                raise CampaignExecutionError("mini root is required")
-            self._validate_mini_root(mini_root)
-            secret = os.environ.get("DEEPSEEK_API_KEY")
-            if not secret:
-                raise CampaignExecutionError("Mini runtime credential is unavailable")
-            output = self.root / "mini-output" / task.instance_id; output.mkdir(parents=True, exist_ok=True)
-            config = self.root / "configs" / "mini" / (task.instance_id + ".yaml"); config.parent.mkdir(parents=True, exist_ok=True)
-            self._atomic(config, self._mini_config().encode("utf-8"))
-            command = CampaignCommand(
-                ("uv", "run", "--project", str(mini_root), "--frozen", "python", "-m", "minisweagent.run.benchmarks.swebench", "--subset", "verified", "--split", "test", "--filter", "^" + task.instance_id.replace("-", "\\-") + "$", "--output", str(output), "--workers", "1", "--model", "openai/deepseek-v4-flash", "--config", str(mini_root / "src/minisweagent/config/benchmarks/swebench.yaml"), "--config", str(config)),
-                # This mapping is process-local only.  It is deliberately not
-                # serialized into config, state, command arguments, or logs.
-                environment={**os.environ, "OPENAI_API_KEY": secret}, timeout_seconds=1800,
-            )
-            result = self._run(command, label="mini")
-            patch = self._mini_patch(output, task.instance_id)
-            trajectory = output / task.instance_id / (task.instance_id + ".traj.json")
-            return self._terminal_attempt(task.instance_id, patch, trajectory, model_calls=self._mini_calls(trajectory), steps=0)
-        runtime = workspace / ".agentforge" / "runtime.toml"; runtime.parent.mkdir(exist_ok=True)
-        self._atomic(runtime, self._agentforge_runtime(task.instance_id).encode("utf-8"))
-        command = CampaignCommand(("uv", "run", "--frozen", "agentforge", "exec", "--workspace", str(workspace), "--database-path", ".agentforge/agentforge.db", "--model", "deepseek-v4-flash", "--max-steps", "80", task.instance_id), timeout_seconds=1800)
-        result = self._run(command, label="agentforge")
-        run_id = self._field(result.stdout, "run_id")
-        patch = self._git_patch(workspace)
-        trajectory = self.root / "trajectories" / "agentforge" / (task.instance_id + ".log")
-        trajectory.parent.mkdir(parents=True, exist_ok=True); self._atomic(trajectory, result.stdout.encode("utf-8"))
-        return self._terminal_attempt(task.instance_id, patch, trajectory, run_id=run_id, model_calls=0, steps=0)
-
-    def _terminal_attempt(self, instance_id: str, patch: str, trajectory: Path, *, run_id: str | None = None, model_calls: int, steps: int) -> _CampaignAttempt:
-        raw = trajectory.read_bytes() if trajectory.is_file() else b""
-        return _CampaignAttempt(instance_id=instance_id, attempt_index=1, status=AttemptStatus.COMPLETED, failure_class=AttemptFailureClass.EMPTY if not patch else AttemptFailureClass.NONE, model_patch=patch, run_id=run_id, model_calls=model_calls, steps=steps, trajectory_path=_relative(self.root, trajectory) if trajectory.exists() else None, trajectory_sha256=hashlib.sha256(raw).hexdigest() if trajectory.exists() else None)
-
-    @staticmethod
-    def _field(text: str, name: str) -> str | None:
-        for token in text.split():
-            if token.startswith(name + "="):
-                return token.split("=", 1)[1]
-        return None
-
-    def _git_patch(self, workspace: Path) -> str:
-        try:
-            return self._run(CampaignCommand(("git", "-C", str(workspace), "diff", "--binary")), label="git").stdout
-        except CampaignExecutionError:
-            return ""
-
-    @staticmethod
-    def _mini_config() -> str:
-        return """agent:\n  step_limit: 50\n  cost_limit: 0.0\n  wall_time_limit_seconds: 1800\n  max_consecutive_format_errors: 3\nmodel:\n  model_name: openai/deepseek-v4-flash\n  model_kwargs:\n    drop_params: true\n    parallel_tool_calls: false\n    api_base: https://api.deepseek.com/v1\n    temperature: 0\n    extra_body:\n      thinking:\n        type: disabled\nenvironment:\n  cwd: /testbed\n  timeout: 120\n  run_args: [\"--rm\", \"--network=none\"]\n  container_timeout: 2h\n  pull_timeout: 1800\n"""
-
-    @staticmethod
-    def _agentforge_runtime(task_id: str) -> str:
-        python = sys.executable.replace("\\", "/")
-        return f'''[provider]\nkind = "deepseek"\n\n[model_budget]\nmax_model_requests = 52\nmax_retries = 2\nmax_output_tokens_per_request = 4096\nmax_total_tokens = 600000\n\n[policy]\ntask_id = "{task_id}"\npolicy_version = 1\ndifficulty = "ENGINEERING"\nbudget_profile = "SWE_BENCH_PASS1"\nallowed_write_paths = ["**"]\nforbidden_write_paths = [".agentforge/**", ".git/**"]\nprotected_paths = [".agentforge/**"]\nallowed_development_test_profiles = ["compile"]\nfinal_verification_profile_id = "verify"\nallow_file_creation = true\nallowed_create_paths = ["**"]\npath_case_sensitive = false\n\n[[profiles]]\nprofile_id = "compile"\nname = "Compile capability"\ndescription = "Generic syntax capability; official harness is Task7"\nexecutable = "{python}"\nargv = ["-m", "compileall", "-q", "."]\ncwd = "."\ntimeout_seconds = 120\nmax_output_bytes = 4096\nprofile_version = 1\npurpose = "development"\n\n[[profiles]]\nprofile_id = "verify"\nname = "Verification capability"\ndescription = "Official scoring is external"\nexecutable = "{python}"\nargv = ["-m", "compileall", "-q", "."]\ncwd = "."\ntimeout_seconds = 120\nmax_output_bytes = 4096\nprofile_version = 1\npurpose = "verification"\n'''
-
-    @staticmethod
-    def _validate_mini_root(root: Path) -> None:
-        try:
-            if root.is_symlink() or not root.is_dir(): raise ValueError
-            commit = subprocess.run(("git", "-C", str(root), "rev-parse", "HEAD"), capture_output=True, text=True, check=False).stdout.strip()
-            version = (root / "src" / "minisweagent" / "__init__.py").read_text(encoding="utf-8")
-            lock = (root / "uv.lock").read_bytes()
-        except OSError:
-            raise CampaignExecutionError("Pinned mini root is invalid") from None
-        if commit != "25941c89cfbc91eb40b3f8756348c91d9977d57e" or "2.4.6" not in version or not lock:
-            raise CampaignExecutionError("Pinned mini root does not match protocol")
-
-    @staticmethod
-    def _mini_patch(output: Path, instance_id: str) -> str:
-        try:
-            data = json.loads((output / "preds.json").read_text(encoding="utf-8"))
-            value = data.get(instance_id, "") if isinstance(data, dict) else ""
-            return value if isinstance(value, str) else ""
-        except (OSError, json.JSONDecodeError):
-            return ""
-
-    @staticmethod
-    def _mini_calls(trajectory: Path) -> int:
-        try:
-            value = json.loads(trajectory.read_text(encoding="utf-8"))["info"]["model_stats"]["api_calls"]
-            return value if type(value) is int and value >= 0 else 0
-        except (OSError, KeyError, TypeError, json.JSONDecodeError):
-            return 0
-
-    def status(self) -> dict[str, int]:
-        state = self._load()
-        counts = {"planned": 0, "running": 0, "completed": 0, "failed": 0, "admission": state.admission_count}
-        for arm_records in state.attempts.values():
-            for record in arm_records: counts[record.status.value.lower()] += 1
-        return counts
-
-    def finalize_predictions(self, arm: BenchmarkArm) -> CampaignArtifactResult:
-        state = self._load(); self._require_prepared(state)
-        if arm.value in state.finalized_arms:
-            raise CampaignExecutionError("Predictions for this arm are already finalized")
-        records = self._records(state, arm)
-        if set(records) != {task.instance_id for task in self.protocol.tasks} or any(record.status not in {AttemptStatus.COMPLETED, AttemptStatus.FAILED} for record in records.values()):
-            raise CampaignExecutionError("Finalization requires ten terminal attempts")
-        predictions: list[SWEbenchPrediction] = []; attempts: list[BenchmarkAttemptRecord] = []
-        namespace: Literal["agentforge", "mini-swe-agent"] = "agentforge" if arm is BenchmarkArm.AGENTFORGE else "mini-swe-agent"
-        for task in self.protocol.tasks:
-            record = records[task.instance_id]
-            binding = SWEbenchInstanceBinding(instance_id=task.instance_id, repo=task.repo, base_commit=task.base_commit)
-            prediction = SWEbenchPrediction.empty(binding, self.protocol.model, namespace=namespace) if not record.model_patch else SWEbenchPrediction(instance_id=task.instance_id, model_name_or_path=namespace + ":" + self.protocol.model, model_patch=record.model_patch, base_commit=task.base_commit, patch_sha256=hashlib.sha256(record.model_patch.encode()).hexdigest())
-            predictions.append(prediction)
-            attempts.append(BenchmarkAttemptRecord(protocol_sha256=self.protocol.protocol_sha256, arm=arm, instance_id=task.instance_id, attempt_index=1, status=record.status, failure_class=record.failure_class, model_calls=record.model_calls, steps=record.steps, trajectory_path=record.trajectory_path, trajectory_sha256=record.trajectory_sha256, prediction_patch_sha256=prediction.patch_sha256))
-        result = finalize_verified10_campaign(self.protocol, attempts, predictions, self.root / (arm.value.lower() + "-predictions.json"), self.root / (arm.value.lower() + "-ledger.json"), arm=arm)
-        self._save(state.model_copy(update={"finalized_arms": (*state.finalized_arms, arm.value)}))
-        return result
+        return getattr(verified10_runner, name)
+    raise AttributeError(name)

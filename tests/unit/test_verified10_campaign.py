@@ -8,6 +8,8 @@ import pytest
 from pydantic import ValidationError
 
 import agentforge.evaluation.verified10_campaign as campaign_module
+from agentforge.application.bootstrap import ProductRuntimeDefinitionLoader
+from agentforge.application.config import ProductConfigLoader
 from agentforge.evaluation.swebench_prediction import SWEbenchInstanceBinding, SWEbenchPrediction
 from agentforge.evaluation.verified10_campaign import (
     ATTEMPT_STATUS_VALUES,
@@ -18,6 +20,7 @@ from agentforge.evaluation.verified10_campaign import (
     BenchmarkArm,
     BenchmarkAttemptRecord,
     CampaignArtifactError,
+    CampaignExecutionError,
     Verified10Protocol,
     Verified10ProtocolError,
     Verified10Task,
@@ -29,6 +32,13 @@ from agentforge.evaluation.verified10_campaign import (
     public_task_sha256,
     save_attempt_ledger,
     validate_public_task,
+)
+from agentforge.evaluation.verified10_runner import (
+    CampaignCommand,
+    DockerImageBinding,
+    MiniSourceVerifier,
+    Verified10Campaign,
+    select_and_validate_public_rows,
 )
 
 ROOT = Path(__file__).parents[2]
@@ -55,16 +65,21 @@ def test_protocol_artifact_is_loadable_and_frozen() -> None:
 def test_protocol_digest_has_independent_known_encoding_and_mutation_sensitivity() -> None:
     protocol = load_verified10_protocol(PROTOCOL_PATH)
     payload = protocol.model_dump(mode="json")
-    encoded = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode("utf-8")
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
     expected = hashlib.sha256(encoded).hexdigest()
     assert expected == "d57db5029157ff9eea5f722c8977834ff98e7facd24eec7470e7fbcb48e3d231"
     assert protocol.protocol_sha256 == expected
     reordered = {key: payload[key] for key in reversed(tuple(payload))}
-    assert hashlib.sha256(
-        json.dumps(reordered, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-    ).hexdigest() == expected
+    assert (
+        hashlib.sha256(
+            json.dumps(
+                reordered, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode()
+        ).hexdigest()
+        == expected
+    )
     mutated = json.loads(json.dumps(payload))
     mutated["mini_budget"]["step_limit"] = 51
     assert canonical_digest(mutated) != expected
@@ -378,12 +393,13 @@ def test_finalizer_exports_ten_public_rows_and_private_ledger(tmp_path: Path) ->
     assert [row["instance_id"] for row in ledger] == list(EXPECTED_INSTANCE_IDS)
     assert len(ledger) == 10
     assert all(set(row) == {"instance_id", "model_name_or_path", "model_patch"} for row in public)
-    assert result.predictions_sha256 == hashlib.sha256(
-        (tmp_path / "predictions.json").read_bytes()
-    ).hexdigest()
-    assert result.ledger_sha256 == hashlib.sha256(
-        (tmp_path / "ledger.json").read_bytes()
-    ).hexdigest()
+    assert (
+        result.predictions_sha256
+        == hashlib.sha256((tmp_path / "predictions.json").read_bytes()).hexdigest()
+    )
+    assert (
+        result.ledger_sha256 == hashlib.sha256((tmp_path / "ledger.json").read_bytes()).hexdigest()
+    )
     with pytest.raises(CampaignArtifactError, match="exist"):
         finalize_verified10_campaign(
             protocol,
@@ -642,3 +658,155 @@ def test_loader_wraps_missing_and_directory_as_domain_error(tmp_path: Path) -> N
     directory.mkdir()
     with pytest.raises(Verified10ProtocolError):
         load_verified10_protocol(directory)
+
+
+def test_dataset_selection_filters_noise_orders_and_validates_hashes() -> None:
+    tasks = tuple(
+        Verified10Task(
+            instance_id=f"owner__repo-{index}",
+            repo="owner/repo",
+            base_commit=f"{index:040x}",
+            public_task_sha256=public_task_sha256(
+                instance_id=f"owner__repo-{index}",
+                repo="owner/repo",
+                base_commit=f"{index:040x}",
+                problem_statement=f"problem {index}",
+            ),
+        )
+        for index in range(10)
+    )
+    protocol = type("SyntheticProtocol", (), {"tasks": tasks})()
+    rows = [
+        {
+            "instance_id": task.instance_id,
+            "repo": task.repo,
+            "base_commit": task.base_commit,
+            "problem_statement": f"problem {index}",
+        }
+        for index, task in reversed(tuple(enumerate(tasks)))
+    ]
+    rows.insert(
+        3,
+        {
+            "instance_id": "noise__repo-99",
+            "repo": "noise/repo",
+            "base_commit": "f" * 40,
+            "problem_statement": "noise",
+        },
+    )
+
+    selected = select_and_validate_public_rows(rows, protocol)  # type: ignore[arg-type]
+
+    assert [row["instance_id"] for row in selected] == [task.instance_id for task in tasks]
+    assert len(selected) == 10
+    with pytest.raises(ValueError, match="missing"):
+        select_and_validate_public_rows(rows[:-2], protocol)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="duplicate"):
+        select_and_validate_public_rows([*rows, rows[0]], protocol)  # type: ignore[arg-type]
+    corrupted = [dict(row) for row in rows]
+    target = next(row for row in corrupted if row["instance_id"] == tasks[0].instance_id)
+    target["problem_statement"] = "changed"
+    with pytest.raises(ValueError, match="hash mismatch"):
+        select_and_validate_public_rows(corrupted, protocol)  # type: ignore[arg-type]
+
+
+def test_docker_binding_requires_unique_matching_repo_digest() -> None:
+    digest = "a" * 64
+    binding = DockerImageBinding.from_inspect(
+        "docker.io/swebench/example:latest",
+        json.dumps([f"docker.io/swebench/example@sha256:{digest}"]),
+    )
+    assert binding.digest_reference == f"docker.io/swebench/example@sha256:{digest}"
+    with pytest.raises(CampaignExecutionError, match="unique"):
+        DockerImageBinding.from_inspect(
+            "docker.io/swebench/example:latest",
+            json.dumps(
+                [
+                    f"docker.io/swebench/example@sha256:{digest}",
+                    f"docker.io/swebench/example@sha256:{'b' * 64}",
+                ]
+            ),
+        )
+    with pytest.raises(CampaignExecutionError, match="match"):
+        DockerImageBinding.from_inspect(
+            "docker.io/swebench/example:latest",
+            json.dumps([f"docker.io/other/example@sha256:{digest}"]),
+        )
+
+
+def test_campaign_command_repr_never_contains_environment_values() -> None:
+    command = CampaignCommand(("mini",), environment={"OPENAI_API_KEY": "secret-value"})
+    assert "secret-value" not in repr(command)
+    assert command.environment_names == ("OPENAI_API_KEY",)
+
+
+def test_real_mini_source_verifier_rejects_commit_and_lock_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    subprocess.run(("git", "init", "-q", str(tmp_path)), check=True)
+    subprocess.run(
+        ("git", "-C", str(tmp_path), "config", "user.email", "test@example.com"), check=True
+    )
+    subprocess.run(("git", "-C", str(tmp_path), "config", "user.name", "Test"), check=True)
+    (tmp_path / "uv.lock").write_text("wrong", encoding="utf-8")
+    package = tmp_path / "src" / "minisweagent"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text('__version__ = "2.4.6"\n', encoding="utf-8")
+    builtin = package / "config" / "benchmarks"
+    builtin.mkdir(parents=True)
+    (builtin / "swebench.yaml").write_text("agent: {}\n", encoding="utf-8")
+    subprocess.run(("git", "-C", str(tmp_path), "add", "."), check=True)
+    subprocess.run(("git", "-C", str(tmp_path), "commit", "-qm", "fixture"), check=True)
+
+    with pytest.raises(CampaignExecutionError, match="commit"):
+        MiniSourceVerifier().verify(tmp_path)
+
+    actual_head = subprocess.run(
+        ("git", "-C", str(tmp_path), "rev-parse", "HEAD"),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    monkeypatch.setattr("agentforge.evaluation.verified10_support.MINI_COMMIT", actual_head)
+    with pytest.raises(CampaignExecutionError, match=r"uv\.lock hash"):
+        MiniSourceVerifier().verify(tmp_path)
+
+
+def test_generated_agentforge_files_pass_product_loaders_without_secrets(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    config_dir = workspace / ".agentforge"
+    config_dir.mkdir()
+    config_text = Verified10Campaign._agentforge_config()
+    runtime_text = Verified10Campaign._agentforge_runtime(EXPECTED_INSTANCE_IDS[0])
+    (config_dir / "config.toml").write_text(config_text, encoding="utf-8")
+    (config_dir / "runtime.toml").write_text(runtime_text, encoding="utf-8")
+
+    config = ProductConfigLoader(user_root=tmp_path / "empty-user").load(
+        workspace,
+        cli={
+            "database_path": ".agentforge/agentforge.db",
+            "model": "deepseek-v4-flash",
+            "max_steps": 80,
+            "profile_ids": ("compile", "verify"),
+        },
+    )
+    runtime = ProductRuntimeDefinitionLoader().load(workspace, config=config)
+
+    assert config.model == "deepseek-v4-flash"
+    assert config.max_steps == 80
+    assert runtime.profile_ids == ("compile", "verify")
+    assert runtime.model_budget.model_dump() == {
+        "max_model_requests": 52,
+        "max_retries": 2,
+        "max_output_tokens_per_request": 4096,
+        "max_total_input_tokens": None,
+        "max_total_output_tokens": None,
+        "max_total_tokens": 600000,
+    }
+    assert "api_key" not in (config_text + runtime_text).casefold()
+    assert "temperature" not in runtime_text.casefold()

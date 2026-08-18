@@ -129,17 +129,39 @@ def test_capture_rejects_empty_patch(tmp_path: Path) -> None:
         )
 
 
-def test_capture_rejects_untracked_files(tmp_path: Path) -> None:
+def test_capture_includes_untracked_files_without_mutating_real_index(tmp_path: Path) -> None:
     repository, base_commit = _repository(tmp_path)
     (repository / "source.py").write_text("answer = 2\n", encoding="utf-8")
     (repository / "created.py").write_text("created = True\n", encoding="utf-8")
 
-    with pytest.raises(SWEbenchPredictionError, match="untracked"):
-        SWEbenchPredictionExporter().capture(
-            repository,
-            binding=_binding(base_commit),
-            model_identity="deepseek/account-model",
-        )
+    before = _git(repository, "status", "--porcelain=v1")
+    prediction = SWEbenchPredictionExporter().capture(
+        repository,
+        binding=_binding(base_commit),
+        model_identity="deepseek/account-model",
+    )
+
+    assert "diff --git a/created.py b/created.py" in prediction.model_patch
+    assert "created = True" in prediction.model_patch
+    assert _git(repository, "status", "--porcelain=v1") == before
+
+
+def test_capture_can_exclude_runner_owned_untracked_directory(tmp_path: Path) -> None:
+    repository, base_commit = _repository(tmp_path)
+    (repository / "created.py").write_text("created = True\n", encoding="utf-8")
+    runtime = repository / ".agentforge"
+    runtime.mkdir()
+    (runtime / "runtime.toml").write_text("runner-owned\n", encoding="utf-8")
+
+    prediction = SWEbenchPredictionExporter().capture(
+        repository,
+        binding=_binding(base_commit),
+        model_identity="deepseek/account-model",
+        excluded_untracked_prefixes=(".agentforge",),
+    )
+
+    assert "created.py" in prediction.model_patch
+    assert ".agentforge" not in prediction.model_patch
 
 
 def test_capture_includes_staged_new_files(tmp_path: Path) -> None:

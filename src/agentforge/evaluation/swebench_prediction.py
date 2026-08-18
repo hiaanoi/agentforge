@@ -91,37 +91,17 @@ class SWEbenchPredictionExporter:
         *,
         binding: SWEbenchInstanceBinding,
         model_identity: str,
+        excluded_untracked_prefixes: tuple[str, ...] = (),
     ) -> SWEbenchPrediction:
         root = self._workspace_root(workspace)
         normalized_identity = _normalized_model_identity(model_identity, namespace="agentforge")
 
-        head = self._run_git(root, "rev-parse", "--verify", "HEAD").decode(
-            "ascii"
-        ).strip()
+        head = self._run_git(root, "rev-parse", "--verify", "HEAD").decode("ascii").strip()
         if head != binding.base_commit:
             raise SWEbenchPredictionError("Workspace HEAD does not match the bound base commit")
 
-        status = self._run_git(
-            root,
-            "status",
-            "--porcelain=v1",
-            "--untracked-files=normal",
-            "--ignored=no",
-        )
-        if any(line.startswith(b"?? ") for line in status.splitlines()):
-            raise SWEbenchPredictionError(
-                "Workspace contains untracked files that the patch would omit"
-            )
-
-        patch_bytes = self._run_git(
-            root,
-            "diff",
-            "--binary",
-            "--no-ext-diff",
-            "--src-prefix=a/",
-            "--dst-prefix=b/",
-            "HEAD",
-            "--",
+        patch_bytes = self._capture_patch(
+            root, excluded_untracked_prefixes=excluded_untracked_prefixes
         )
         if not patch_bytes:
             raise SWEbenchPredictionError("SWE-bench model patch is empty")
@@ -136,6 +116,67 @@ class SWEbenchPredictionExporter:
             model_patch=model_patch,
             base_commit=binding.base_commit,
             patch_sha256=hashlib.sha256(patch_bytes).hexdigest(),
+        )
+
+    def _capture_patch(self, root: Path, *, excluded_untracked_prefixes: tuple[str, ...]) -> bytes:
+        untracked_raw = self._run_git(root, "ls-files", "--others", "--exclude-standard", "-z")
+        if not untracked_raw:
+            return self._diff(root)
+        try:
+            all_untracked = tuple(
+                item.decode("utf-8") for item in untracked_raw.rstrip(b"\0").split(b"\0")
+            )
+        except UnicodeDecodeError as exc:
+            raise SWEbenchPredictionError("Untracked Git path is not valid UTF-8") from exc
+        prefixes = tuple(prefix.rstrip("/") for prefix in excluded_untracked_prefixes)
+        if any(
+            not prefix
+            or prefix.startswith("/")
+            or any(part in {"", ".", ".."} for part in prefix.split("/"))
+            for prefix in prefixes
+        ):
+            raise SWEbenchPredictionError("Excluded untracked prefix is unsafe")
+        untracked = tuple(
+            path
+            for path in all_untracked
+            if not any(path == prefix or path.startswith(prefix + "/") for prefix in prefixes)
+        )
+        if not untracked:
+            return self._diff(root)
+        index_raw = self._run_git(root, "rev-parse", "--git-path", "index")
+        try:
+            index_path = Path(index_raw.decode("utf-8").strip())
+        except UnicodeDecodeError as exc:
+            raise SWEbenchPredictionError("Git index path is not valid UTF-8") from exc
+        if not index_path.is_absolute():
+            index_path = root / index_path
+        temporary = index_path.with_name(f".{index_path.name}.agentforge-{uuid4().hex}.tmp")
+        environment = {**self._git_environment(), "GIT_INDEX_FILE": str(temporary)}
+        try:
+            shutil.copy2(index_path, temporary)
+            self._run_git_with_environment(
+                root, "add", "--intent-to-add", "--", *untracked, environment=environment
+            )
+            return self._diff(root, environment=environment)
+        except OSError as exc:
+            raise SWEbenchPredictionError("Temporary Git index could not be prepared") from exc
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def _diff(self, root: Path, *, environment: dict[str, str] | None = None) -> bytes:
+        return self._run_git_with_environment(
+            root,
+            "diff",
+            "--binary",
+            "--no-ext-diff",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            "HEAD",
+            "--",
+            environment=environment,
         )
 
     @staticmethod
@@ -154,11 +195,19 @@ class SWEbenchPredictionExporter:
         return resolved
 
     def _run_git(self, root: Path, *arguments: str) -> bytes:
+        return self._run_git_with_environment(root, *arguments)
+
+    def _run_git_with_environment(
+        self,
+        root: Path,
+        *arguments: str,
+        environment: dict[str, str] | None = None,
+    ) -> bytes:
         try:
             completed = subprocess.run(
                 [str(self._git_executable), *arguments],
                 cwd=root,
-                env=self._git_environment(),
+                env=environment or self._git_environment(),
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 timeout=_GIT_TIMEOUT_SECONDS,
