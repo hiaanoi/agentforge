@@ -11,6 +11,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal, cast
 from uuid import UUID, uuid5
 
 from sqlalchemy import select
@@ -191,7 +192,7 @@ class WorkspaceBaselineStore:
                 relative_path=item.relative_path,
                 sha256=item.sha256,
                 size_bytes=item.size_bytes,
-                file_kind=item.file_kind,
+                file_kind=cast(Literal["REGULAR_FILE", "SYMLINK"], item.file_kind),
                 executable_bit=item.executable_bit,
                 is_symlink=item.is_symlink,
                 is_reparse_point=item.is_reparse_point,

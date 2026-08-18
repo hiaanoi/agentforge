@@ -178,7 +178,13 @@ class WorkspaceDiffValidator:
         for path in type_changed:
             violations.append(DiffViolation(kind=DiffViolationKind.FILE_TYPE_CHANGED, path=path))
         for path in modified:
-            if self._is_link_or_reparse(base[path]) or self._is_link_or_reparse(current[path]):
+            if (
+                base[path].file_kind == current[path].file_kind
+                and (
+                    self._is_link_or_reparse(base[path])
+                    or self._is_link_or_reparse(current[path])
+                )
+            ):
                 violations.append(
                     DiffViolation(
                         kind=DiffViolationKind.SYMLINK_OR_REPARSE_CHANGED,
@@ -275,7 +281,15 @@ class WorkspaceDiffValidator:
     ) -> list[tuple[str, str]]:
         renamed: list[tuple[str, str]] = []
         for old in deleted:
-            matches = [new for new in created if current[new].sha256 == base[old].sha256]
+            matches = [
+                new
+                for new in created
+                if (
+                    current[new].file_kind == base[old].file_kind
+                    and current[new].sha256 == base[old].sha256
+                    and current[new].size_bytes == base[old].size_bytes
+                )
+            ]
             if len(matches) == 1:
                 renamed.append((old, matches[0]))
         return sorted(renamed)

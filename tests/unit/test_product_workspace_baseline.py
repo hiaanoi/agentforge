@@ -3,6 +3,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from agentforge.application.product_workspace import (
     ProductWorkspaceCapture,
@@ -128,6 +129,41 @@ def test_capture_inventories_safe_posix_symlinks_without_following_them(tmp_path
     assert prepared.baseline.files[0].file_kind == "SYMLINK"
     assert prepared.baseline.files[0].is_symlink is True
     assert prepared.baseline.files[0].is_reparse_point is False
+    database = Database.from_path(tmp_path / "app.db")
+    database.create_schema()
+    store = WorkspaceBaselineStore()
+    with ApplicationUnitOfWork(database) as uow:
+        store.put(uow.session, prepared.baseline)
+        uow.commit()
+    with ApplicationUnitOfWork(database) as uow:
+        stored = store.get(uow.session, prepared.baseline.baseline_id)
+        assert stored.files == prepared.baseline.files
+
+
+@pytest.mark.parametrize(
+    ("file_kind", "is_symlink", "is_reparse_point"),
+    [
+        ("REGULAR_FILE", True, False),
+        ("REGULAR_FILE", False, True),
+        ("SYMLINK", False, False),
+        ("SYMLINK", True, True),
+        ("REPARSE_POINT", False, True),
+    ],
+)
+def test_workspace_baseline_rejects_inconsistent_link_metadata(
+    file_kind: str, is_symlink: bool, is_reparse_point: bool
+) -> None:
+    with pytest.raises(ValidationError):
+        WorkspaceFileBaseline(
+            relative_path="entry.txt",
+            sha256="a" * 64,
+            size_bytes=1,
+            file_kind=file_kind,
+            executable_bit=False,
+            is_symlink=is_symlink,
+            is_reparse_point=is_reparse_point,
+            content_kind=FileContentKind.TEXT,
+        )
 
 
 def test_product_diff_reports_changed_and_created_safe_posix_symlinks(tmp_path: Path) -> None:
@@ -228,6 +264,9 @@ def test_product_diff_reports_regular_and_symlink_type_changes(tmp_path: Path) -
     assert DiffViolationKind.FILE_TYPE_CHANGED in {
         violation.kind for violation in result.violations
     }
+    assert DiffViolationKind.SYMLINK_OR_REPARSE_CHANGED not in {
+        violation.kind for violation in result.violations
+    }
 
     reverse_baseline = capture.capture(root, task_id="repair", command_id=uuid4())
     source.unlink()
@@ -239,6 +278,120 @@ def test_product_diff_reports_regular_and_symlink_type_changes(tmp_path: Path) -
     assert reverse.type_changed_files == ("entry.txt",)
     assert DiffViolationKind.FILE_TYPE_CHANGED in {
         violation.kind for violation in reverse.violations
+    }
+    assert DiffViolationKind.SYMLINK_OR_REPARSE_CHANGED not in {
+        violation.kind for violation in reverse.violations
+    }
+
+
+def test_product_diff_does_not_pair_regular_and_symlink_as_rename(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    regular = WorkspaceFileBaseline(
+        relative_path="old.txt",
+        sha256="a" * 64,
+        size_bytes=3,
+        executable_bit=False,
+        content_kind=FileContentKind.TEXT,
+    )
+    link = WorkspaceFileBaseline(
+        relative_path="new.txt",
+        sha256="a" * 64,
+        size_bytes=3,
+        file_kind="SYMLINK",
+        executable_bit=False,
+        is_symlink=True,
+        content_kind=FileContentKind.BINARY,
+    )
+    baseline = WorkspaceBaseline(
+        task_id="repair",
+        workspace_root=str(root.resolve()),
+        root_digest="b" * 64,
+        files=(regular,),
+    )
+    scan = WorkspaceScan(
+        workspace_root=str(root.resolve()), root_digest="c" * 64, files=(link,)
+    )
+    policy = RepairTaskPolicy(
+        task_id="repair",
+        policy_version=1,
+        difficulty=RepairDifficulty.BASIC,
+        budget_profile=BudgetProfile.BASIC,
+        allowed_write_paths=("**",),
+        protected_paths=(),
+        allowed_development_test_profiles=("unit",),
+        final_verification_profile_id="final",
+        allow_file_creation=True,
+        max_created_files=5,
+        max_changed_files=5,
+        max_total_changed_bytes=1024,
+        max_single_file_changed_bytes=1024,
+        path_case_sensitive=False,
+    )
+
+    result = WorkspaceDiffValidator(
+        WorkspacePathResolver(root), scanner=_StaticScanner(scan)
+    ).validate(baseline, policy)
+
+    assert result.renamed_files == ()
+    assert DiffViolationKind.FILE_RENAMED not in {violation.kind for violation in result.violations}
+
+
+def test_product_diff_type_change_does_not_report_link_target_change(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    regular = WorkspaceFileBaseline(
+        relative_path="entry.txt",
+        sha256="a" * 64,
+        size_bytes=3,
+        executable_bit=False,
+        content_kind=FileContentKind.TEXT,
+    )
+    link = WorkspaceFileBaseline(
+        relative_path="entry.txt",
+        sha256="b" * 64,
+        size_bytes=4,
+        file_kind="SYMLINK",
+        executable_bit=False,
+        is_symlink=True,
+        content_kind=FileContentKind.BINARY,
+    )
+    baseline = WorkspaceBaseline(
+        task_id="repair",
+        workspace_root=str(root.resolve()),
+        root_digest="c" * 64,
+        files=(regular,),
+    )
+    scan = WorkspaceScan(
+        workspace_root=str(root.resolve()), root_digest="d" * 64, files=(link,)
+    )
+    policy = RepairTaskPolicy(
+        task_id="repair",
+        policy_version=1,
+        difficulty=RepairDifficulty.BASIC,
+        budget_profile=BudgetProfile.BASIC,
+        allowed_write_paths=("**",),
+        protected_paths=(),
+        allowed_development_test_profiles=("unit",),
+        final_verification_profile_id="final",
+        allow_file_creation=True,
+        max_created_files=5,
+        max_changed_files=5,
+        max_total_changed_bytes=1024,
+        max_single_file_changed_bytes=1024,
+        path_case_sensitive=False,
+    )
+
+    result = WorkspaceDiffValidator(
+        WorkspacePathResolver(root), scanner=_StaticScanner(scan)
+    ).validate(baseline, policy)
+
+    assert result.type_changed_files == ("entry.txt",)
+    assert DiffViolationKind.FILE_TYPE_CHANGED in {
+        violation.kind for violation in result.violations
+    }
+    assert DiffViolationKind.SYMLINK_OR_REPARSE_CHANGED not in {
+        violation.kind for violation in result.violations
     }
 
 
