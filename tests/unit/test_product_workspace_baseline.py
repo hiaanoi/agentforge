@@ -22,7 +22,12 @@ from agentforge.domain.repair import (
     RepairTaskPolicy,
 )
 from agentforge.evaluation.validators import WorkspaceDiffValidator
-from agentforge.evaluation.workspace import WorkspaceBaseline
+from agentforge.evaluation.workspace import (
+    FileContentKind,
+    WorkspaceBaseline,
+    WorkspaceFileBaseline,
+    WorkspaceScan,
+)
 from agentforge.models.domain import ModelBudget
 from agentforge.persistence.application_uow import ApplicationUnitOfWork
 from agentforge.persistence.database import Database
@@ -174,6 +179,125 @@ def test_product_diff_reports_changed_and_created_safe_posix_symlinks(tmp_path: 
     assert DiffViolationKind.SYMLINK_OR_REPARSE_CREATED in {
         violation.kind for violation in created.violations
     }
+
+    (root / "new-link.txt").unlink()
+    link.unlink()
+    deleted = WorkspaceDiffValidator(
+        WorkspacePathResolver(root), scanner=ProductWorkspaceScanner(root)
+    ).validate(prepared.baseline, policy)
+
+    assert deleted.deleted_files == ("link.txt",)
+    assert DiffViolationKind.FILE_DELETED in {
+        violation.kind for violation in deleted.violations
+    }
+
+
+def test_product_diff_reports_regular_and_symlink_type_changes(tmp_path: Path) -> None:
+    if os.name != "posix":
+        pytest.skip("safe symlink inventory is POSIX-only")
+    root = tmp_path / "workspace"
+    root.mkdir()
+    source = root / "entry.txt"
+    source.write_text("regular", encoding="utf-8")
+    capture = ProductWorkspaceCapture()
+    prepared = capture.capture(root, task_id="repair", command_id=uuid4())
+    policy = RepairTaskPolicy(
+        task_id="repair",
+        policy_version=1,
+        difficulty=RepairDifficulty.BASIC,
+        budget_profile=BudgetProfile.BASIC,
+        allowed_write_paths=("**",),
+        protected_paths=(),
+        allowed_development_test_profiles=("unit",),
+        final_verification_profile_id="final",
+        allow_file_creation=True,
+        max_created_files=5,
+        max_changed_files=5,
+        max_total_changed_bytes=1024,
+        max_single_file_changed_bytes=1024,
+        path_case_sensitive=False,
+    )
+
+    source.unlink()
+    source.symlink_to("replacement.txt")
+    result = WorkspaceDiffValidator(
+        WorkspacePathResolver(root), scanner=ProductWorkspaceScanner(root)
+    ).validate(prepared.baseline, policy)
+
+    assert result.type_changed_files == ("entry.txt",)
+    assert DiffViolationKind.FILE_TYPE_CHANGED in {
+        violation.kind for violation in result.violations
+    }
+
+    reverse_baseline = capture.capture(root, task_id="repair", command_id=uuid4())
+    source.unlink()
+    source.write_text("regular replacement", encoding="utf-8")
+    reverse = WorkspaceDiffValidator(
+        WorkspacePathResolver(root), scanner=ProductWorkspaceScanner(root)
+    ).validate(reverse_baseline.baseline, policy)
+
+    assert reverse.type_changed_files == ("entry.txt",)
+    assert DiffViolationKind.FILE_TYPE_CHANGED in {
+        violation.kind for violation in reverse.violations
+    }
+
+
+def test_product_diff_does_not_read_text_from_link_inventory_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    entry = WorkspaceFileBaseline(
+        relative_path="link.py",
+        sha256="a" * 64,
+        size_bytes=1,
+        file_kind="SYMLINK",
+        executable_bit=False,
+        is_symlink=True,
+        is_reparse_point=False,
+        content_kind=FileContentKind.TEXT,
+    )
+    scan = WorkspaceScan(workspace_root=str(root.resolve()), root_digest="b" * 64, files=(entry,))
+    baseline = WorkspaceBaseline(
+        task_id="repair",
+        workspace_root=str(root.resolve()),
+        root_digest="c" * 64,
+        files=(),
+    )
+    policy = RepairTaskPolicy(
+        task_id="repair",
+        policy_version=1,
+        difficulty=RepairDifficulty.BASIC,
+        budget_profile=BudgetProfile.BASIC,
+        allowed_write_paths=("**",),
+        protected_paths=(),
+        allowed_development_test_profiles=("unit",),
+        final_verification_profile_id="final",
+        allow_file_creation=True,
+        max_created_files=5,
+        max_changed_files=5,
+        max_total_changed_bytes=1024,
+        max_single_file_changed_bytes=1024,
+        path_case_sensitive=False,
+    )
+
+    def fail_read_text(*_: object, **__: object) -> str:
+        raise AssertionError("link content must not be read")
+
+    monkeypatch.setattr(Path, "read_text", fail_read_text)
+    result = WorkspaceDiffValidator(
+        WorkspacePathResolver(root), scanner=_StaticScanner(scan)
+    ).validate(baseline, policy)
+
+    assert result.suspicious_findings == ()
+
+
+class _StaticScanner:
+    def __init__(self, scan: WorkspaceScan) -> None:
+        self._scan = scan
+
+    def scan(self) -> WorkspaceScan:
+        return self._scan
 
 
 def test_session_store_rejects_missing_extra_and_tampered_rows(tmp_path: Path) -> None:

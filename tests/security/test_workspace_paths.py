@@ -50,7 +50,7 @@ def test_resolver_rejects_empty_and_invalid_paths(tmp_path: Path, requested: str
     assert error.value.code is ToolErrorCode.INVALID_PATH
 
 
-def test_resolver_rejects_external_symlink_and_allows_internal_symlink(tmp_path: Path) -> None:
+def test_resolver_rejects_external_and_internal_symlinks(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     outside = tmp_path / "outside.txt"
@@ -69,8 +69,28 @@ def test_resolver_rejects_external_symlink_and_allows_internal_symlink(tmp_path:
     with pytest.raises(WorkspacePathError) as error:
         resolver.resolve("external-link.txt", PathKind.FILE)
     assert error.value.code is ToolErrorCode.PATH_OUTSIDE_WORKSPACE
-    assert resolver.resolve("internal-link.txt", PathKind.FILE) == target.resolve()
-    assert resolver.relative(target.resolve()) == "target.txt"
+    with pytest.raises(WorkspacePathError) as error:
+        resolver.resolve("internal-link.txt", PathKind.FILE)
+    assert error.value.code is ToolErrorCode.PATH_OUTSIDE_WORKSPACE
+
+
+def test_resolver_rejects_lstat_marked_internal_path_component(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "app.py").write_text("print('ok')", encoding="utf-8")
+    resolver = WorkspacePathResolver(tmp_path)
+    monkeypatch.setattr(
+        resolver,
+        "_is_reparse_point",
+        lambda path: path == source,
+    )
+
+    with pytest.raises(WorkspacePathError) as error:
+        resolver.resolve("src/app.py", PathKind.FILE)
+
+    assert error.value.code is ToolErrorCode.PATH_OUTSIDE_WORKSPACE
 
 
 def test_resolver_rejects_invalid_workspace_and_path_types(tmp_path: Path) -> None:
@@ -115,7 +135,7 @@ def test_sensitive_file_policy_allows_normal_text_file() -> None:
     SensitiveFilePolicy().require_allowed("src/readme.txt")
 
 
-def test_sensitive_file_policy_checks_canonical_symlink_target(tmp_path: Path) -> None:
+def test_resolver_rejects_sensitive_internal_symlink_before_policy_checks(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     sensitive = workspace / ".env"
@@ -127,7 +147,7 @@ def test_sensitive_file_policy_checks_canonical_symlink_target(tmp_path: Path) -
         pytest.skip(f"Symlinks are unavailable on this platform: {exc}")
     resolver = WorkspacePathResolver(workspace)
 
-    resolved = resolver.resolve("public.txt", PathKind.FILE)
+    with pytest.raises(WorkspacePathError) as error:
+        resolver.resolve("public.txt", PathKind.FILE)
 
-    with pytest.raises(SensitivePathError):
-        SensitiveFilePolicy().require_allowed(resolver.relative(resolved))
+    assert error.value.code is ToolErrorCode.PATH_OUTSIDE_WORKSPACE
