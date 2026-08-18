@@ -48,7 +48,7 @@ def test_enums_are_closed() -> None:
 def test_protocol_rejects_drifted_ids_budgets_and_generation_fields() -> None:
     payload = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
     payload["tasks"][0]["instance_id"] = "django__django-12419"
-    with pytest.raises(ValidationError, match=r"instance|order|duplicate"):
+    with pytest.raises(ValidationError, match=r"instance|order|duplicate|frozen|selection"):
         Verified10Protocol.model_validate(payload)
 
     payload = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
@@ -58,6 +58,36 @@ def test_protocol_rejects_drifted_ids_budgets_and_generation_fields() -> None:
 
     payload = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
     payload["generation_forbidden_fields"] = ["patch"]
+    with pytest.raises(ValidationError):
+        Verified10Protocol.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("path", "replacement"),
+    [
+        (("tasks", 0, "selection_rank"), "a" * 64),
+        (("tasks", 0, "public_task_sha256"), "b" * 64),
+        (("dataset_fingerprint",), "another-public-fingerprint"),
+        (("source_selection_sha256",), "c" * 64),
+    ],
+)
+def test_protocol_rejects_legal_but_drifted_frozen_metadata(
+    path: tuple[object, ...], replacement: str
+) -> None:
+    payload = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
+    target: object = payload
+    for key in path[:-1]:
+        target = target[key]  # type: ignore[index]
+    target[path[-1]] = replacement  # type: ignore[index]
+
+    with pytest.raises(ValidationError):
+        Verified10Protocol.model_validate(payload)
+
+
+def test_protocol_rejects_legal_but_drifted_budget_source_url() -> None:
+    payload = json.loads(PROTOCOL_PATH.read_text(encoding="utf-8"))
+    payload["budget_rationale"][0]["source_url"] = "https://example.com/another-source"
+
     with pytest.raises(ValidationError):
         Verified10Protocol.model_validate(payload)
 

@@ -85,6 +85,92 @@ _TASK_METADATA: dict[str, tuple[str, str]] = {
     ),
 }
 
+_FROZEN_TASK_BINDINGS = (
+    (
+        "0021a6cc0b3f00fa98c226473304f8a8c77e3563f412f8a00caa393f291cd909",
+        "scikit-learn__scikit-learn-13142",
+        "scikit-learn/scikit-learn",
+        "1c8668b0a021832386470ddf740d834e02c66f69",
+        "9f06307581ce7500feef1f13a0787b8a6cae79148b74cc4f8be359fc19121cf6",
+    ),
+    (
+        "0034bdf3cf80162dc8ac1db996043c25ae04242fd47d7fd55f12c8f9812fd66c",
+        "django__django-12419",
+        "django/django",
+        "7fa1a93c6c8109010a6ff3f604fda83b604e0e97",
+        "25f3f330f1d759f32e075a9044e65b2b4f6bf511dab97c524a87fdac5f742a24",
+    ),
+    (
+        "012581344961f487b90d5363574659a3c90b03cac716d705f755861e6b887a0b",
+        "django__django-13212",
+        "django/django",
+        "f4e93919e4608cfc50849a1f764fd856e0917401",
+        "25efae42f34a4b48cde1f0c6baabc8e7bf2727c9f66dede2bcc02279cdd447f8",
+    ),
+    (
+        "016bdfacb0eaae6e9eb824ee8ebe4d412fc056c8a37de97204d4e77042f4c3b1",
+        "scikit-learn__scikit-learn-13496",
+        "scikit-learn/scikit-learn",
+        "3aefc834dce72e850bff48689bea3c7dff5f3fad",
+        "eaa512bc8bef6ad4d5bb745ba320447bf0878eecfa8015fbed2287b3eb2b243b",
+    ),
+    (
+        "03b8a5895ff385c7f718202f58f8388d51a7c128da6f1cf2355bef27ae54178d",
+        "django__django-13343",
+        "django/django",
+        "ece18207cbb64dd89014e279ac636a6c9829828e",
+        "53284d1ec9f445c5929f03c62c97153caf40d44c2157eb433d453272b1027bae",
+    ),
+    (
+        "048c279800db517bd66ee630d35a280253f03dcd534e23e69b7cd4a3576cb962",
+        "matplotlib__matplotlib-24026",
+        "matplotlib/matplotlib",
+        "14c96b510ebeba40f573e512299b1976f35b620e",
+        "5f16b267c474e37aab014af334324d450743eaff39744a37cbb3155d88005fdd",
+    ),
+    (
+        "04fefb9bb4515de22f0b688db0b851178a895792cfc63e3aa263726b28292c64",
+        "django__django-12050",
+        "django/django",
+        "b93a0e34d9b9b99d41103782b7e7aeabf47517e3",
+        "bcd5d62508d55f0a1b62da171623297b5205c3878b4d8bca2b9cb11bf0d1052a",
+    ),
+    (
+        "053c82003c4072f9c4a9d24a20f1943402c9b16ae7dc42f44868bd770e6fb16d",
+        "pytest-dev__pytest-7571",
+        "pytest-dev/pytest",
+        "422685d0bdc110547535036c1ff398b5e1c44145",
+        "b495b461821edfedf6c31666490d7f3c89a4cef0f7e4075d8f3d5575dd097434",
+    ),
+    (
+        "055bb685b4111ed49e1b46fbd4c16b547238db38dcfe461c9af75adc2d0ec8e1",
+        "sympy__sympy-16886",
+        "sympy/sympy",
+        "c50643a49811e9fe2f4851adff4313ad46f7325e",
+        "5bcf752353d75ecbdbee43dbe44c6e70d64a7e32cf13327a9a47d5e0933b1ec7",
+    ),
+    (
+        "057a3a83545da946ace7c672d5c5428d9d651a81d3c8deeb534b87f4a77bb4dd",
+        "pylint-dev__pylint-8898",
+        "pylint-dev/pylint",
+        "1f8c4d9eb185c16a2c1d881c054f015e1c2eb334",
+        "055f83fc61e4e97be328dcdc7c34eb09bbe2981fe1a69e51a97702e50be10b3d",
+    ),
+)
+
+_FROZEN_DATASET_FINGERPRINT = "1fdfd21ba2621130"
+_FROZEN_SOURCE_SELECTION_SHA256 = (
+    "9c385f13580c05e3cb5590e2abb43b278fa8ed99597315d7010f6953785ca9c0"
+)
+_MINI_SWE_AGENT_CONFIG_URL = (
+    "https://github.com/SWE-agent/mini-swe-agent/blob/main/"
+    "src/minisweagent/config/benchmarks/swebench.yaml"
+)
+_SWE_AGENT_MODELS_URL = (
+    "https://github.com/princeton-nlp/SWE-agent/blob/main/sweagent/agent/models.py"
+)
+_OPENHANDS_CONFIG_URL = "https://github.com/OpenHands/OpenHands/blob/main/config.template.toml"
+
 
 def canonical_digest(value: object) -> str:
     """Return the protocol's stable SHA256 encoding for JSON-compatible values."""
@@ -247,26 +333,36 @@ class Verified10Protocol(_FrozenModel):
 
     @model_validator(mode="after")
     def validate_frozen_protocol(self) -> Self:
-        ids = tuple(task.instance_id for task in self.tasks)
-        if ids != EXPECTED_INSTANCE_IDS or len(set(ids)) != 10:
-            raise ValueError("tasks must contain the exact ten instance IDs in selection order")
-        for task in self.tasks:
-            expected_repo, expected_base = _TASK_METADATA[task.instance_id]
-            if (task.repo, task.base_commit) != (expected_repo, expected_base):
-                raise ValueError(f"repo/base_commit mismatch for {task.instance_id}")
+        actual_bindings = tuple(
+            (
+                task.selection_rank,
+                task.instance_id,
+                task.repo,
+                task.base_commit,
+                task.public_task_sha256,
+            )
+            for task in self.tasks
+        )
+        if actual_bindings != _FROZEN_TASK_BINDINGS:
+            raise ValueError("tasks do not match the frozen old selection bindings")
+        if self.dataset_fingerprint != _FROZEN_DATASET_FINGERPRINT:
+            raise ValueError("dataset_fingerprint does not match the frozen selection")
+        if self.source_selection_sha256 != _FROZEN_SOURCE_SELECTION_SHA256:
+            raise ValueError("source_selection_sha256 does not match the frozen selection")
         if len(self.budget_rationale) != 4:
             raise ValueError("budget_rationale must contain four official values")
-        rationale_keys = {
-            (item.benchmark, item.value, item.unit) for item in self.budget_rationale
-        }
-        expected_keys = {
-            ("mini-swe-agent", 250, "steps"),
-            ("mini-swe-agent", 3, "usd"),
-            ("SWE-agent", 3, "usd"),
-            ("OpenHands", 500, "iterations"),
-        }
-        if rationale_keys != expected_keys:
-            raise ValueError("budget_rationale official values are incomplete or drifted")
+        actual_rationale = tuple(
+            (item.benchmark, item.source_url, item.value, item.unit)
+            for item in self.budget_rationale
+        )
+        expected_rationale = (
+            ("mini-swe-agent", _MINI_SWE_AGENT_CONFIG_URL, 250, "steps"),
+            ("mini-swe-agent", _MINI_SWE_AGENT_CONFIG_URL, 3, "usd"),
+            ("SWE-agent", _SWE_AGENT_MODELS_URL, 3, "usd"),
+            ("OpenHands", _OPENHANDS_CONFIG_URL, 500, "iterations"),
+        )
+        if actual_rationale != expected_rationale:
+            raise ValueError("budget_rationale sources or official values drifted")
         return self
 
     @property
