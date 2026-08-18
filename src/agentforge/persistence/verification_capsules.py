@@ -311,12 +311,10 @@ class VerificationCapsuleBuilder:
                 if total_entries > self._limits.max_entries:
                     raise WorkspaceDigestError()
                 child_stat = child.stat(follow_symlinks=False)
-                name = unicodedata.normalize("NFC", child.name)
-                if not name or name != child.name or "/" in name or "\x00" in name:
-                    raise WorkspaceDigestError()
+                name = self._normalized_entry_name(child.name)
                 child_parts = (*parts, name)
                 relative = "/".join(child_parts)
-                collision = relative.casefold()
+                collision = unicodedata.normalize("NFC", relative).casefold()
                 if collision in collision_keys:
                     raise WorkspaceDigestError()
                 collision_keys.add(collision)
@@ -499,6 +497,13 @@ class VerificationCapsuleBuilder:
             return os.path.commonpath((left_key, right_key)) in {left_key, right_key}
         except ValueError:
             return False
+
+    @staticmethod
+    def _normalized_entry_name(value: str) -> str:
+        name = unicodedata.normalize("NFC", value)
+        if not name or "/" in name or "\x00" in name:
+            raise WorkspaceDigestError()
+        return name
 
     @staticmethod
     def _reject_link_reparse_or_special(

@@ -106,9 +106,11 @@ def test_capture_preserves_safe_relative_symlink_and_detects_target_tampering(
 ) -> None:
     source, verifier, store = _roots(tmp_path)
     source_link = source / "pkg" / "linked.py"
+    non_nfc_source_link = source / "pkg" / "cafe\u0301-link.py"
     verifier_link = verifier / "linked_test.py"
     try:
         source_link.symlink_to("module.py")
+        non_nfc_source_link.symlink_to("module.py")
         verifier_link.symlink_to("test_hidden.py")
     except OSError as exc:
         pytest.skip(f"Symlinks are unavailable on this platform: {exc}")
@@ -119,10 +121,13 @@ def test_capture_preserves_safe_relative_symlink_and_detects_target_tampering(
     )
 
     copied_source_link = capsule.source_root / "pkg" / "linked.py"
+    copied_normalized_source_link = capsule.source_root / "pkg" / "caf\u00e9-link.py"
     copied_verifier_link = capsule.verifier_root / "linked_test.py"
     assert os.path.islink(copied_source_link)
+    assert os.path.islink(copied_normalized_source_link)
     assert os.path.islink(copied_verifier_link)
     assert os.readlink(copied_source_link) == "module.py"
+    assert os.readlink(copied_normalized_source_link) == "module.py"
     assert os.readlink(copied_verifier_link) == "test_hidden.py"
     builder.verify(capsule)
 
@@ -130,6 +135,39 @@ def test_capture_preserves_safe_relative_symlink_and_detects_target_tampering(
     copied_source_link.symlink_to("different.py")
     with pytest.raises(WorkspaceDigestError):
         builder.verify(capsule)
+
+
+@pytest.mark.parametrize(
+    ("raw_name", "normalized_name"),
+    [
+        ("cafe\u0301.py", "caf\u00e9.py"),
+        ("plain.py", "plain.py"),
+    ],
+)
+def test_capsule_normalizes_entry_names_like_workspace_digester(
+    raw_name: str, normalized_name: str
+) -> None:
+    assert VerificationCapsuleBuilder._normalized_entry_name(raw_name) == normalized_name
+
+
+@pytest.mark.parametrize("name", ["", "bad/name.py", "bad\x00name.py"])
+def test_capsule_rejects_invalid_normalized_entry_names(name: str) -> None:
+    with pytest.raises(WorkspaceDigestError):
+        VerificationCapsuleBuilder._normalized_entry_name(name)
+
+
+def test_capture_preserves_workspace_digester_nfc_name_semantics(tmp_path: Path) -> None:
+    source, verifier, store = _roots(tmp_path)
+    (source / "pkg" / "cafe\u0301.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    capsule = VerificationCapsuleBuilder(store).capture(
+        execution_id=uuid4(), source_root=source, verifier_root=verifier
+    )
+
+    assert (
+        capsule.source_root / "pkg" / "caf\u00e9.py"
+    ).read_text(encoding="utf-8") == "VALUE = 2\n"
+    assert capsule.source_digest == WorkspaceDigester().digest(source)
 
 
 @pytest.mark.parametrize("target", ["/outside.py", "../outside.py"])
