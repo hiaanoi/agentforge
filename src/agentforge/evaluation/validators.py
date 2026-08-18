@@ -147,7 +147,9 @@ class WorkspaceDiffValidator:
         created = sorted(current.keys() - base.keys())
         deleted = sorted(base.keys() - current.keys())
         type_changed = sorted(
-            path for path in deleted if (self._resolver.workspace / Path(path)).exists()
+            path
+            for path in base.keys() & current.keys()
+            if base[path].file_kind != current[path].file_kind
         )
         renamed = self._rename_like(base, current, deleted, created)
         changed_paths = sorted(set(modified) | set(created) | set(deleted))
@@ -159,6 +161,13 @@ class WorkspaceDiffValidator:
             self._path_violations(path, creating=False, policy=policy, target=violations)
         for path in created:
             self._path_violations(path, creating=True, policy=policy, target=violations)
+            if self._is_link_or_reparse(current[path]):
+                violations.append(
+                    DiffViolation(
+                        kind=DiffViolationKind.SYMLINK_OR_REPARSE_CREATED,
+                        path=path,
+                    )
+                )
         for path in deleted:
             violations.append(DiffViolation(kind=DiffViolationKind.FILE_DELETED, path=path))
             self._path_violations(path, creating=False, policy=policy, target=violations)
@@ -168,6 +177,14 @@ class WorkspaceDiffValidator:
             )
         for path in type_changed:
             violations.append(DiffViolation(kind=DiffViolationKind.FILE_TYPE_CHANGED, path=path))
+        for path in modified:
+            if self._is_link_or_reparse(base[path]) or self._is_link_or_reparse(current[path]):
+                violations.append(
+                    DiffViolation(
+                        kind=DiffViolationKind.SYMLINK_OR_REPARSE_CHANGED,
+                        path=path,
+                    )
+                )
         for path in changed_paths:
             if self._sensitive.match(path) is not None:
                 violations.append(
@@ -230,7 +247,6 @@ class WorkspaceDiffValidator:
             suspicious_findings=tuple(findings),
         )
 
-
     @staticmethod
     def _metadata_changed(
         before: WorkspaceFileBaseline,
@@ -241,8 +257,14 @@ class WorkspaceDiffValidator:
             or before.size_bytes != after.size_bytes
             or before.executable_bit != after.executable_bit
             or before.file_kind != after.file_kind
+            or before.is_symlink != after.is_symlink
+            or before.is_reparse_point != after.is_reparse_point
             or before.content_kind != after.content_kind
         )
+
+    @staticmethod
+    def _is_link_or_reparse(entry: WorkspaceFileBaseline) -> bool:
+        return entry.is_symlink or entry.is_reparse_point
 
     @staticmethod
     def _rename_like(
@@ -301,7 +323,12 @@ class WorkspaceDiffValidator:
         findings: list[SuspiciousFinding] = []
         for path in paths:
             entry = current.get(path)
-            if entry is None or entry.content_kind is not FileContentKind.TEXT:
+            if (
+                entry is None
+                or entry.is_symlink
+                or entry.is_reparse_point
+                or entry.content_kind is not FileContentKind.TEXT
+            ):
                 continue
             if entry.size_bytes > 1_000_000:
                 continue

@@ -94,6 +94,7 @@ class DiffViolationKind(StrEnum):
     FILE_DELETED = "FILE_DELETED"
     FILE_RENAMED = "FILE_RENAMED"
     SYMLINK_OR_REPARSE_CREATED = "SYMLINK_OR_REPARSE_CREATED"
+    SYMLINK_OR_REPARSE_CHANGED = "SYMLINK_OR_REPARSE_CHANGED"
     FILE_TYPE_CHANGED = "FILE_TYPE_CHANGED"
     CHANGESET_TOO_LARGE = "CHANGESET_TOO_LARGE"
     TOO_MANY_FILES_CHANGED = "TOO_MANY_FILES_CHANGED"
@@ -320,9 +321,7 @@ class RepairState(BaseModel):
     final_verification_success: bool | None = None
     final_verification_completed_at: UtcDatetime | None = None
     last_diff_validation_id: str | None = None
-    final_workspace_digest: str | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
+    final_workspace_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     final_diff_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     latest_source_verified: bool = False
     pending_final_verification: bool = False

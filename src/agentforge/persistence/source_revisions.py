@@ -80,6 +80,7 @@ class WorkspaceDigestEntry:
     content_sha256: str
     executable_bit: bool = False
     content_kind: Literal["TEXT", "BINARY"] = "BINARY"
+    entry_kind: Literal["REGULAR_FILE", "SYMLINK"] = "REGULAR_FILE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,13 +115,9 @@ class MutationRecoveryAction(StrEnum):
     MARK_INDETERMINATE = "MARK_INDETERMINATE"
 
 
-def source_revision_audit(
-    source_bound: bool, *, actual_digest_verified: bool
-) -> tuple[str, bool]:
+def source_revision_audit(source_bound: bool, *, actual_digest_verified: bool) -> tuple[str, bool]:
     semantics = (
-        BOUND_SOURCE_REVISION_SEMANTICS
-        if source_bound
-        else UNBOUND_SOURCE_REVISION_SEMANTICS
+        BOUND_SOURCE_REVISION_SEMANTICS if source_bound else UNBOUND_SOURCE_REVISION_SEMANTICS
     )
     return semantics, source_bound and actual_digest_verified
 
@@ -232,9 +229,7 @@ class WorkspaceDigester:
                 nonlocal total_bytes, total_entries
                 directory_before = os.lstat(directory)
                 self._require_directory(directory_before)
-                self._require_same_identity(
-                    enumerated_stat, directory_before, directory=True
-                )
+                self._require_same_identity(enumerated_stat, directory_before, directory=True)
                 with os.scandir(directory) as scanned:
                     children = sorted(tuple(scanned), key=lambda item: os.fsencode(item.name))
                 for child in children:
@@ -242,10 +237,9 @@ class WorkspaceDigester:
                     if total_entries > self._limits.max_entries:
                         raise WorkspaceDigestError()
                     child_stat = child.stat(follow_symlinks=False)
-                    self._reject_link_or_reparse(child_stat)
+                    self._reject_reparse(child_stat)
                     child_path = Path(child.path)
                     child_path_before = os.lstat(child_path)
-                    self._require_same_object(child_stat, child_path_before)
                     raw_name = child.name
                     normalized_name = unicodedata.normalize("NFC", raw_name)
                     if not normalized_name or "/" in normalized_name or "\x00" in normalized_name:
@@ -257,6 +251,31 @@ class WorkspaceDigester:
                         raise WorkspaceDigestError()
                     collision_keys.add(collision_key)
                     mode = child_stat.st_mode
+                    if stat.S_ISLNK(mode):
+                        target_bytes = self._read_safe_posix_symlink_target(
+                            child_path,
+                            child_stat,
+                            root_path=root_path,
+                        )
+                        if len(entries) >= self._limits.max_files:
+                            raise WorkspaceDigestError()
+                        if len(target_bytes) > self._limits.max_file_bytes:
+                            raise WorkspaceDigestError()
+                        total_bytes += len(target_bytes)
+                        if total_bytes > self._limits.max_total_bytes:
+                            raise WorkspaceDigestError()
+                        entries.append(
+                            WorkspaceDigestEntry(
+                                relative_path=relative,
+                                size_bytes=len(target_bytes),
+                                content_sha256=self.content_digest(
+                                    b"agentforge-symlink-target-v1\0" + target_bytes
+                                ),
+                                entry_kind="SYMLINK",
+                            )
+                        )
+                        continue
+                    self._require_same_object(child_stat, child_path_before)
                     if stat.S_ISDIR(mode):
                         if exclude_directory(child_parts):
                             continue
@@ -280,8 +299,7 @@ class WorkspaceDigester:
                             size_bytes=len(data),
                             content_sha256=self.content_digest(data),
                             executable_bit=bool(
-                                child_stat.st_mode
-                                & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                                child_stat.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
                             ),
                             content_kind=self._content_kind(data),
                         )
@@ -291,9 +309,7 @@ class WorkspaceDigester:
 
             visit(root_path, (), root_before)
             validated_root, root_chain_after = self._validate_root_chain(root)
-            if validated_root != root_path or len(root_chain_after) != len(
-                root_chain_before
-            ):
+            if validated_root != root_path or len(root_chain_after) != len(root_chain_before):
                 raise WorkspaceDigestError()
             for before_component, after_component in zip(
                 root_chain_before, root_chain_after, strict=True
@@ -313,9 +329,7 @@ class WorkspaceDigester:
             raise WorkspaceDigestError() from None
 
     @classmethod
-    def _validate_root_chain(
-        cls, root: Path
-    ) -> tuple[Path, tuple[os.stat_result, ...]]:
+    def _validate_root_chain(cls, root: Path) -> tuple[Path, tuple[os.stat_result, ...]]:
         raw = os.fspath(root)
         if not isinstance(raw, (str, bytes)) or not raw or "\x00" in os.fsdecode(raw):
             raise WorkspaceDigestError()
@@ -403,6 +417,30 @@ class WorkspaceDigester:
         finally:
             os.close(descriptor)
 
+    def _read_safe_posix_symlink_target(
+        self,
+        path: Path,
+        scanned_stat: os.stat_result,
+        *,
+        root_path: Path,
+    ) -> bytes:
+        if os.name != "posix":
+            raise WorkspaceDigestError()
+        link_before = os.lstat(path)
+        self._require_same_symlink_object(scanned_stat, link_before)
+        target_text = os.readlink(path)
+        link_after = os.lstat(path)
+        self._require_same_symlink_object(link_before, link_after)
+        if type(target_text) is not str or "\x00" in target_text or os.path.isabs(target_text):
+            raise WorkspaceDigestError()
+        candidate = os.path.normpath(os.path.join(os.fspath(path.parent), target_text))
+        try:
+            if os.path.commonpath((os.fspath(root_path), candidate)) != os.fspath(root_path):
+                raise WorkspaceDigestError()
+        except ValueError:
+            raise WorkspaceDigestError() from None
+        return os.fsencode(target_text)
+
     def _digest_entries(self, entries: tuple[WorkspaceDigestEntry, ...]) -> str:
         digest = hashlib.sha256()
         digest.update(b"agentforge-workspace-source\x00")
@@ -410,7 +448,7 @@ class WorkspaceDigester:
         digest.update(struct.pack(">Q", len(entries)))
         for entry in entries:
             path_bytes = entry.relative_path.encode("utf-8")
-            digest.update(b"F")
+            digest.update(b"L" if entry.entry_kind == "SYMLINK" else b"F")
             digest.update(struct.pack(">I", len(path_bytes)))
             digest.update(path_bytes)
             digest.update(struct.pack(">Q", entry.size_bytes))
@@ -454,10 +492,29 @@ class WorkspaceDigester:
 
     @staticmethod
     def _reject_link_or_reparse(value: os.stat_result) -> None:
-        if stat.S_ISLNK(value.st_mode) or bool(
-            getattr(value, "st_file_attributes", 0) & _REPARSE_POINT
-        ):
+        if stat.S_ISLNK(value.st_mode):
             raise WorkspaceDigestError()
+        WorkspaceDigester._reject_reparse(value)
+
+    @staticmethod
+    def _reject_reparse(value: os.stat_result) -> None:
+        if bool(getattr(value, "st_file_attributes", 0) & _REPARSE_POINT):
+            raise WorkspaceDigestError()
+
+    @classmethod
+    def _require_same_symlink_object(cls, before: os.stat_result, after: os.stat_result) -> None:
+        cls._reject_reparse(before)
+        cls._reject_reparse(after)
+        if not stat.S_ISLNK(before.st_mode) or not stat.S_ISLNK(after.st_mode):
+            raise WorkspaceDigestError()
+        stable_fields = ("st_mode", "st_size", "st_mtime_ns")
+        if any(getattr(before, field) != getattr(after, field) for field in stable_fields):
+            raise WorkspaceDigestError()
+        for identity_field in ("st_dev", "st_ino"):
+            before_identity = getattr(before, identity_field)
+            after_identity = getattr(after, identity_field)
+            if before_identity and after_identity and before_identity != after_identity:
+                raise WorkspaceDigestError()
 
     @classmethod
     def _require_directory(cls, value: os.stat_result) -> None:
@@ -488,9 +545,7 @@ class WorkspaceDigester:
             raise WorkspaceDigestError()
 
     @classmethod
-    def _require_same_object(
-        cls, before: os.stat_result, after: os.stat_result
-    ) -> None:
+    def _require_same_object(cls, before: os.stat_result, after: os.stat_result) -> None:
         cls._reject_link_or_reparse(after)
         if before.st_mode != after.st_mode:
             raise WorkspaceDigestError()
@@ -632,9 +687,7 @@ class SourceRevisionStore:
                 WorkspaceSourceBindingRow.source_revision_number == expected_revision_number,
                 WorkspaceSourceBindingRow.digest_algorithm_version == DIGEST_ALGORITHM_VERSION,
                 exists().where(
-                    *RunLeaseStore.write_conditions(
-                        authority, now=RunLeaseStore(None).now(session)
-                    )
+                    *RunLeaseStore.write_conditions(authority, now=RunLeaseStore(None).now(session))
                 ),
             )
             .values(

@@ -12,6 +12,7 @@ from agentforge.application.kernel_errors import WorkspaceDigestError
 from agentforge.persistence.source_revisions import (
     DIGEST_ALGORITHM_VERSION,
     SourceRevision,
+    WorkspaceDigestEntry,
     WorkspaceDigester,
     WorkspaceDigestLimits,
     source_revision_audit,
@@ -40,9 +41,10 @@ def test_source_revision_audit_separates_binding_from_actual_verification(
     semantics: str,
     verified: bool,
 ) -> None:
-    assert source_revision_audit(
-        source_bound, actual_digest_verified=actual_verified
-    ) == (semantics, verified)
+    assert source_revision_audit(source_bound, actual_digest_verified=actual_verified) == (
+        semantics,
+        verified,
+    )
 
 
 def test_digest_is_sorted_byte_exact_and_excludes_only_approved_metadata(
@@ -88,7 +90,13 @@ def test_digest_distinguishes_unambiguous_path_length_and_raw_content_frames(
     assert WorkspaceDigester().digest(left) != WorkspaceDigester().digest(right)
 
 
-def test_digest_rejects_symlink_root_and_entry_without_disclosing_path(
+def test_digest_entry_defaults_to_regular_file_kind() -> None:
+    entry = WorkspaceDigestEntry("a.txt", 0, WorkspaceDigester.content_digest(b""))
+
+    assert entry.entry_kind == "REGULAR_FILE"
+
+
+def test_digest_rejects_symlink_root_without_disclosing_path(
     tmp_path: Path,
 ) -> None:
     target = tmp_path / "target"
@@ -102,23 +110,78 @@ def test_digest_rejects_symlink_root_and_entry_without_disclosing_path(
 
     with pytest.raises(WorkspaceDigestError) as root_error:
         WorkspaceDigester().digest(link)
-    with pytest.raises(WorkspaceDigestError) as entry_error:
-        WorkspaceDigester().digest(tmp_path)
     assert str(root_error.value) == "workspace digest rejected"
-    assert str(entry_error.value) == "workspace digest rejected"
     assert str(target) not in str(root_error.value)
+
+
+def test_digest_records_safe_posix_relative_symlink_target_without_reading_target(
+    tmp_path: Path,
+) -> None:
+    if os.name != "posix":
+        pytest.skip("safe symlink inventory is POSIX-only")
+    root = tmp_path / "workspace"
+    root.mkdir()
+    link = root / "link.txt"
+    try:
+        link.symlink_to("missing-target.txt")
+    except OSError:
+        pytest.skip("symlink creation is unavailable on this platform")
+
+    snapshot = WorkspaceDigester().snapshot(root)
+
+    entry = snapshot.entries[0]
+    target_bytes = b"missing-target.txt"
+    assert entry.relative_path == "link.txt"
+    assert entry.entry_kind == "SYMLINK"
+    assert entry.size_bytes == len(target_bytes)
+    assert entry.content_sha256 == WorkspaceDigester.content_digest(
+        b"agentforge-symlink-target-v1\0" + target_bytes
+    )
+
+
+def test_digest_changes_when_safe_posix_symlink_target_changes(tmp_path: Path) -> None:
+    if os.name != "posix":
+        pytest.skip("safe symlink inventory is POSIX-only")
+    root = tmp_path / "workspace"
+    root.mkdir()
+    link = root / "link.txt"
+    try:
+        link.symlink_to("first.txt")
+    except OSError:
+        pytest.skip("symlink creation is unavailable on this platform")
+    digester = WorkspaceDigester()
+    first = digester.digest(root)
+
+    link.unlink()
+    link.symlink_to("second.txt")
+
+    assert digester.digest(root) != first
+
+
+@pytest.mark.parametrize("target", ("/absolute-target.txt", "../escape-target.txt"))
+def test_digest_rejects_absolute_and_lexically_escaping_symlink_targets(
+    tmp_path: Path, target: str
+) -> None:
+    if os.name != "posix":
+        pytest.skip("safe symlink inventory is POSIX-only")
+    root = tmp_path / "workspace"
+    root.mkdir()
+    link = root / "link.txt"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("symlink creation is unavailable on this platform")
+
+    with pytest.raises(WorkspaceDigestError, match=r"^workspace digest rejected$"):
+        WorkspaceDigester().digest(root)
 
 
 @pytest.mark.parametrize(
     "limits",
     [
         WorkspaceDigestLimits(max_files=1, max_file_bytes=10, max_total_bytes=10),
-        WorkspaceDigestLimits(
-            max_entries=10, max_files=10, max_file_bytes=1, max_total_bytes=10
-        ),
-        WorkspaceDigestLimits(
-            max_entries=10, max_files=10, max_file_bytes=10, max_total_bytes=1
-        ),
+        WorkspaceDigestLimits(max_entries=10, max_files=10, max_file_bytes=1, max_total_bytes=10),
+        WorkspaceDigestLimits(max_entries=10, max_files=10, max_file_bytes=10, max_total_bytes=1),
     ],
 )
 def test_digest_fails_closed_at_every_resource_limit(
@@ -148,9 +211,7 @@ def test_digest_rejects_unicode_normalization_collisions(tmp_path: Path) -> None
 
 
 @pytest.mark.parametrize(("file_count", "accepted"), [(2, True), (3, False)])
-def test_digest_max_files_exact_boundary(
-    tmp_path: Path, file_count: int, accepted: bool
-) -> None:
+def test_digest_max_files_exact_boundary(tmp_path: Path, file_count: int, accepted: bool) -> None:
     _write_tree(tmp_path, {f"{index}.py": b"x" for index in range(file_count)})
     digester = WorkspaceDigester(
         limits=WorkspaceDigestLimits(

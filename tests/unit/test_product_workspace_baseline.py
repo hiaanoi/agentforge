@@ -4,7 +4,6 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from agentforge.application.kernel_errors import WorkspaceDigestError
 from agentforge.application.product_workspace import (
     ProductWorkspaceCapture,
     ProductWorkspaceScanner,
@@ -16,7 +15,12 @@ from agentforge.application.run_creation import (
     SimulatedProcessCrash,
     StartRun,
 )
-from agentforge.domain.repair import BudgetProfile, RepairDifficulty, RepairTaskPolicy
+from agentforge.domain.repair import (
+    BudgetProfile,
+    DiffViolationKind,
+    RepairDifficulty,
+    RepairTaskPolicy,
+)
 from agentforge.evaluation.validators import WorkspaceDiffValidator
 from agentforge.evaluation.workspace import WorkspaceBaseline
 from agentforge.models.domain import ModelBudget
@@ -102,21 +106,74 @@ def test_capture_rechecks_the_same_source_digest_before_driver_start(tmp_path: P
     assert not capture.matches_source(root, prepared.source_digest)
 
 
-def test_capture_rejects_links_with_the_source_digest_hardening(tmp_path: Path) -> None:
+def test_capture_inventories_safe_posix_symlinks_without_following_them(tmp_path: Path) -> None:
+    if os.name != "posix":
+        pytest.skip("safe symlink inventory is POSIX-only")
     root = tmp_path / "workspace"
     root.mkdir()
-    target = root / "target.txt"
-    target.write_text("data", encoding="utf-8")
     linked = root / "link.txt"
     try:
-        linked.symlink_to(target)
-    except OSError as exc:
-        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
-            pytest.skip("symlinks unavailable")
-        raise
+        linked.symlink_to("missing-target.txt")
+    except OSError:
+        pytest.skip("symlinks unavailable")
 
-    with pytest.raises(WorkspaceDigestError):
-        ProductWorkspaceCapture().capture(root, task_id="repair", command_id=uuid4())
+    prepared = ProductWorkspaceCapture().capture(root, task_id="repair", command_id=uuid4())
+
+    assert prepared.baseline.files[0].relative_path == "link.txt"
+    assert prepared.baseline.files[0].file_kind == "SYMLINK"
+    assert prepared.baseline.files[0].is_symlink is True
+    assert prepared.baseline.files[0].is_reparse_point is False
+
+
+def test_product_diff_reports_changed_and_created_safe_posix_symlinks(tmp_path: Path) -> None:
+    if os.name != "posix":
+        pytest.skip("safe symlink inventory is POSIX-only")
+    root = tmp_path / "workspace"
+    root.mkdir()
+    link = root / "link.txt"
+    try:
+        link.symlink_to("first.txt")
+    except OSError:
+        pytest.skip("symlinks unavailable")
+    capture = ProductWorkspaceCapture()
+    prepared = capture.capture(root, task_id="repair", command_id=uuid4())
+    policy = RepairTaskPolicy(
+        task_id="repair",
+        policy_version=1,
+        difficulty=RepairDifficulty.BASIC,
+        budget_profile=BudgetProfile.BASIC,
+        allowed_write_paths=("**",),
+        protected_paths=(),
+        allowed_development_test_profiles=("unit",),
+        final_verification_profile_id="final",
+        allow_file_creation=True,
+        max_created_files=5,
+        max_changed_files=5,
+        max_total_changed_bytes=1024,
+        max_single_file_changed_bytes=1024,
+        path_case_sensitive=False,
+    )
+
+    link.unlink()
+    link.symlink_to("second.txt")
+    changed = WorkspaceDiffValidator(
+        WorkspacePathResolver(root), scanner=ProductWorkspaceScanner(root)
+    ).validate(prepared.baseline, policy)
+
+    assert changed.modified_files == ("link.txt",)
+    assert DiffViolationKind.SYMLINK_OR_REPARSE_CHANGED in {
+        violation.kind for violation in changed.violations
+    }
+
+    (root / "new-link.txt").symlink_to("third.txt")
+    created = WorkspaceDiffValidator(
+        WorkspacePathResolver(root), scanner=ProductWorkspaceScanner(root)
+    ).validate(prepared.baseline, policy)
+
+    assert created.created_files == ("new-link.txt",)
+    assert DiffViolationKind.SYMLINK_OR_REPARSE_CREATED in {
+        violation.kind for violation in created.violations
+    }
 
 
 def test_session_store_rejects_missing_extra_and_tampered_rows(tmp_path: Path) -> None:
@@ -179,20 +236,37 @@ def test_run_creation_persists_prepared_baseline_in_its_same_uow(tmp_path: Path)
     command_id = uuid4()
     prepared = ProductWorkspaceCapture().capture(root, task_id="repair", command_id=command_id)
     policy = RepairTaskPolicy(
-        task_id="repair", policy_version=1, difficulty=RepairDifficulty.BASIC,
-        budget_profile=BudgetProfile.BASIC, allowed_write_paths=("**",), protected_paths=(),
-        allowed_development_test_profiles=("unit",), final_verification_profile_id="final",
-        allow_file_creation=False, max_created_files=0, max_changed_files=2,
-        max_total_changed_bytes=1024, max_single_file_changed_bytes=1024,
+        task_id="repair",
+        policy_version=1,
+        difficulty=RepairDifficulty.BASIC,
+        budget_profile=BudgetProfile.BASIC,
+        allowed_write_paths=("**",),
+        protected_paths=(),
+        allowed_development_test_profiles=("unit",),
+        final_verification_profile_id="final",
+        allow_file_creation=False,
+        max_created_files=0,
+        max_changed_files=2,
+        max_total_changed_bytes=1024,
+        max_single_file_changed_bytes=1024,
         path_case_sensitive=False,
     )
     command = StartRun(
-        command_id=command_id, task="repair", max_steps=1, max_tool_calls=1,
-        model_provider="test", model_budget=ModelBudget(max_model_requests=1),
-        workspace_root_identity=str(root.resolve()), git_head=None,
-        initial_source_digest=prepared.source_digest, digest_algorithm_version=1,
-        config_digest="a" * 64, profile_digest="b" * 64, repair_policy=policy,
-        baseline_id=prepared.baseline.baseline_id, baseline_digest=prepared.baseline.root_digest,
+        command_id=command_id,
+        task="repair",
+        max_steps=1,
+        max_tool_calls=1,
+        model_provider="test",
+        model_budget=ModelBudget(max_model_requests=1),
+        workspace_root_identity=str(root.resolve()),
+        git_head=None,
+        initial_source_digest=prepared.source_digest,
+        digest_algorithm_version=1,
+        config_digest="a" * 64,
+        profile_digest="b" * 64,
+        repair_policy=policy,
+        baseline_id=prepared.baseline.baseline_id,
+        baseline_digest=prepared.baseline.root_digest,
     )
     database = Database.from_path(tmp_path / "app.db")
     database.create_schema()
@@ -212,20 +286,37 @@ def test_baseline_failpoint_rolls_back_the_baseline(tmp_path: Path) -> None:
     command_id = uuid4()
     prepared = ProductWorkspaceCapture().capture(root, task_id="repair", command_id=command_id)
     policy = RepairTaskPolicy(
-        task_id="repair", policy_version=1, difficulty=RepairDifficulty.BASIC,
-        budget_profile=BudgetProfile.BASIC, allowed_write_paths=("**",), protected_paths=(),
-        allowed_development_test_profiles=("unit",), final_verification_profile_id="final",
-        allow_file_creation=False, max_created_files=0, max_changed_files=2,
-        max_total_changed_bytes=1024, max_single_file_changed_bytes=1024,
+        task_id="repair",
+        policy_version=1,
+        difficulty=RepairDifficulty.BASIC,
+        budget_profile=BudgetProfile.BASIC,
+        allowed_write_paths=("**",),
+        protected_paths=(),
+        allowed_development_test_profiles=("unit",),
+        final_verification_profile_id="final",
+        allow_file_creation=False,
+        max_created_files=0,
+        max_changed_files=2,
+        max_total_changed_bytes=1024,
+        max_single_file_changed_bytes=1024,
         path_case_sensitive=False,
     )
     command = StartRun(
-        command_id=command_id, task="repair", max_steps=1, max_tool_calls=1,
-        model_provider="test", model_budget=ModelBudget(max_model_requests=1),
-        workspace_root_identity=str(root.resolve()), git_head=None,
-        initial_source_digest=prepared.source_digest, digest_algorithm_version=1,
-        config_digest="a" * 64, profile_digest="b" * 64, repair_policy=policy,
-        baseline_id=prepared.baseline.baseline_id, baseline_digest=prepared.baseline.root_digest,
+        command_id=command_id,
+        task="repair",
+        max_steps=1,
+        max_tool_calls=1,
+        model_provider="test",
+        model_budget=ModelBudget(max_model_requests=1),
+        workspace_root_identity=str(root.resolve()),
+        git_head=None,
+        initial_source_digest=prepared.source_digest,
+        digest_algorithm_version=1,
+        config_digest="a" * 64,
+        profile_digest="b" * 64,
+        repair_policy=policy,
+        baseline_id=prepared.baseline.baseline_id,
+        baseline_digest=prepared.baseline.root_digest,
     )
     database = Database.from_path(tmp_path / "app.db")
     database.create_schema()
@@ -247,11 +338,19 @@ def test_product_diff_scanner_uses_the_recorded_runtime_exclusion(tmp_path: Path
     (root / ".agentforge").mkdir()
     (root / ".agentforge" / "agentforge.db-wal").write_bytes(b"runtime")
     policy = RepairTaskPolicy(
-        task_id="repair", policy_version=1, difficulty=RepairDifficulty.BASIC,
-        budget_profile=BudgetProfile.BASIC, allowed_write_paths=("src/**",), protected_paths=(),
-        allowed_development_test_profiles=("unit",), final_verification_profile_id="final",
-        allow_file_creation=False, max_created_files=0, max_changed_files=2,
-        max_total_changed_bytes=1024, max_single_file_changed_bytes=1024,
+        task_id="repair",
+        policy_version=1,
+        difficulty=RepairDifficulty.BASIC,
+        budget_profile=BudgetProfile.BASIC,
+        allowed_write_paths=("src/**",),
+        protected_paths=(),
+        allowed_development_test_profiles=("unit",),
+        final_verification_profile_id="final",
+        allow_file_creation=False,
+        max_created_files=0,
+        max_changed_files=2,
+        max_total_changed_bytes=1024,
+        max_single_file_changed_bytes=1024,
         path_case_sensitive=False,
     )
 
