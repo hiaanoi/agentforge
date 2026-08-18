@@ -552,13 +552,17 @@ def finalize_verified10_campaign(
         prediction_target, ledger_target = _ensure_distinct_artifacts(
             prediction_path, ledger_path
         )
-        prediction_target = _prepare_artifact_target(prediction_target, reject_existing=True)
-        ledger_target = _prepare_artifact_target(ledger_target, reject_existing=True)
-        # Files are not a transaction: the public prediction is the final commit marker.
-        _atomic_artifact_write(ledger_target, ledger_payload)
-        _atomic_artifact_write(prediction_target, prediction_payload)
-        prediction_digest = hashlib.sha256(prediction_target.read_bytes()).hexdigest()
-        ledger_digest = hashlib.sha256(ledger_target.read_bytes()).hexdigest()
+        lock_path, lock_fd = _acquire_finalize_lock(prediction_target)
+        try:
+            prediction_target = _prepare_artifact_target(prediction_target, reject_existing=True)
+            ledger_target = _prepare_artifact_target(ledger_target, reject_existing=True)
+            # Files are not a transaction: the public prediction is the final commit marker.
+            _atomic_artifact_write(ledger_target, ledger_payload)
+            _atomic_artifact_write(prediction_target, prediction_payload)
+            prediction_digest = hashlib.sha256(prediction_target.read_bytes()).hexdigest()
+            ledger_digest = hashlib.sha256(ledger_target.read_bytes()).hexdigest()
+        finally:
+            _release_finalize_lock(lock_path, lock_fd)
     except CampaignArtifactError:
         raise
     except (OSError, SWEbenchPredictionError, TypeError, ValueError):
@@ -637,6 +641,42 @@ def _ensure_distinct_artifacts(
         raise
     except (OSError, RuntimeError, ValueError):
         raise CampaignArtifactError("Unable to prepare campaign artifact paths") from None
+
+
+def _acquire_finalize_lock(public_target: Path) -> tuple[Path, int]:
+    """Acquire a deterministic publication lock; stale locks are operator-managed."""
+
+    try:
+        public_target.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = public_target.with_name(f".{public_target.name}.finalize.lock")
+        lock_fd = os.open(
+            lock_path,
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+            0o600,
+        )
+        try:
+            os.write(lock_fd, b"finalize lock\n")
+        except OSError:
+            os.close(lock_fd)
+            lock_path.unlink(missing_ok=True)
+            raise
+        return lock_path, lock_fd
+    except FileExistsError:
+        raise CampaignArtifactError(
+            "Campaign finalization is already in progress or stale"
+        ) from None
+    except OSError:
+        raise CampaignArtifactError("Unable to acquire campaign finalization lock") from None
+
+
+def _release_finalize_lock(lock_path: Path, lock_fd: int) -> None:
+    try:
+        os.close(lock_fd)
+    finally:
+        try:
+            lock_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def project_public_task(row: Mapping[str, object]) -> dict[str, str]:

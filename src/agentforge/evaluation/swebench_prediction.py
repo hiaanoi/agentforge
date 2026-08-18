@@ -189,14 +189,13 @@ def save_swebench_prediction(path: Path, prediction: SWEbenchPrediction) -> None
     prediction = _revalidate_prediction(prediction)
     target = path.resolve(strict=False)
     target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name(f".{target.name}.tmp")
     payload = json.dumps(
         prediction.harness_record(),
         ensure_ascii=True,
         sort_keys=True,
         separators=(",", ":"),
     )
-    _atomic_write(target, (payload + "\n").encode("utf-8"), temporary)
+    _atomic_write(target, (payload + "\n").encode("utf-8"))
 
 
 def save_swebench_predictions(
@@ -220,7 +219,7 @@ def save_swebench_predictions(
     )
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        _atomic_write(target, payload, target.with_name(f".{target.name}.tmp"))
+        _atomic_write(target, payload)
     except OSError as exc:
         raise SWEbenchPredictionError("SWE-bench predictions could not be saved") from exc
 
@@ -303,7 +302,7 @@ def _normalized_model_identity(
     return f"{namespace}:{model_identity}"
 
 
-def _atomic_write(target: Path, payload: bytes, temporary: Path) -> None:
+def _atomic_write(target: Path, payload: bytes) -> None:
     temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
     try:
         with temporary.open("wb") as stream:

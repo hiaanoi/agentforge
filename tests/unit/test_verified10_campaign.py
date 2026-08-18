@@ -1,5 +1,7 @@
 import hashlib
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -26,6 +28,7 @@ from agentforge.evaluation.verified10_campaign import (
     load_attempt_ledger,
     save_attempt_ledger,
 )
+import agentforge.evaluation.verified10_campaign as campaign_module
 from agentforge.evaluation.swebench_prediction import SWEbenchInstanceBinding, SWEbenchPrediction
 
 ROOT = Path(__file__).parents[2]
@@ -429,6 +432,72 @@ def test_finalizer_preflights_ledger_parent_before_public_publish(tmp_path: Path
         )
     assert not public_path.exists()
     assert not public_path.with_name(f".{public_path.name}.tmp").exists()
+
+    locked_public = tmp_path / "locked-public.json"
+    lock_path = locked_public.with_name(f".{locked_public.name}.finalize.lock")
+    lock_path.write_text("stale", encoding="utf-8")
+    with pytest.raises(CampaignArtifactError, match="lock|progress"):
+        finalize_verified10_campaign(
+            protocol,
+            attempts,
+            predictions,
+            locked_public,
+            tmp_path / "locked-ledger.json",
+        )
+    assert not locked_public.exists()
+    assert not (tmp_path / "locked-ledger.json").exists()
+
+
+def test_concurrent_finalizers_have_one_publication_winner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    protocol = load_verified10_protocol(PROTOCOL_PATH)
+    predictions = []
+    attempts = []
+    for task in protocol.tasks:
+        binding = SWEbenchInstanceBinding(
+            instance_id=task.instance_id, repo=task.repo, base_commit=task.base_commit
+        )
+        prediction = SWEbenchPrediction.empty(binding, protocol.model)
+        predictions.append(prediction)
+        attempts.append(
+            BenchmarkAttemptRecord(
+                protocol_sha256=protocol.protocol_sha256,
+                arm=BenchmarkArm.AGENTFORGE,
+                instance_id=task.instance_id,
+                attempt_index=1,
+                status=AttemptStatus.FAILED,
+                failure_class=AttemptFailureClass.MODEL_FAILED,
+                prediction_patch_sha256=prediction.patch_sha256,
+            )
+        )
+    public_path = tmp_path / "concurrent.json"
+    ledger_path = tmp_path / "concurrent-ledger.json"
+    barrier = threading.Barrier(2)
+    acquire = campaign_module._acquire_finalize_lock
+
+    def synchronized_acquire(path: Path) -> tuple[Path, int]:
+        barrier.wait(timeout=5)
+        return acquire(path)
+
+    monkeypatch.setattr(campaign_module, "_acquire_finalize_lock", synchronized_acquire)
+
+    def run() -> str:
+        try:
+            finalize_verified10_campaign(
+                protocol, attempts, predictions, public_path, ledger_path
+            )
+        except CampaignArtifactError:
+            return "failed"
+        return "ok"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = sorted(pool.map(lambda _: run(), range(2)))
+
+    assert outcomes == ["failed", "ok"]
+    assert public_path.is_file() and ledger_path.is_file()
+    assert not public_path.with_name(f".{public_path.name}.finalize.lock").exists()
+    assert not list(tmp_path.glob(".*.tmp"))
 
 
 def test_finalizer_rejects_wrong_prediction_checkout_and_model_identity(tmp_path: Path) -> None:
