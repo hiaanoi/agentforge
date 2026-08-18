@@ -15,6 +15,7 @@ class BudgetProfile(StrEnum):
     BASIC = "BASIC"
     ENGINEERING = "ENGINEERING"
     CHALLENGE = "CHALLENGE"
+    SWE_BENCH_PASS1 = "SWE_BENCH_PASS1"
 
 
 class RepairDifficulty(StrEnum):
@@ -155,6 +156,15 @@ _FIXED_BUDGETS: dict[BudgetProfile, RepairBudgetLimits] = {
         max_completion_corrections=1,
         max_policy_violations=2,
         max_wall_time_seconds=900,
+    ),
+    BudgetProfile.SWE_BENCH_PASS1: RepairBudgetLimits(
+        max_model_calls=50,
+        max_read_calls=80,
+        max_edit_attempts=8,
+        max_test_runs=8,
+        max_completion_corrections=2,
+        max_policy_violations=3,
+        max_wall_time_seconds=1800,
     ),
 }
 

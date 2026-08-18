@@ -63,12 +63,12 @@ SHA_B = "b" * 64
 SHA_C = "c" * 64
 
 
-def _policy() -> RepairTaskPolicy:
+def _policy(profile: BudgetProfile = BudgetProfile.BASIC) -> RepairTaskPolicy:
     return RepairTaskPolicy(
         task_id="atomic-task",
         policy_version=1,
         difficulty=RepairDifficulty.BASIC,
-        budget_profile=BudgetProfile.BASIC,
+        budget_profile=profile,
         allowed_write_paths=("src/**",),
         protected_paths=("tests/**",),
         allowed_development_test_profiles=("unit",),
@@ -82,21 +82,28 @@ def _policy() -> RepairTaskPolicy:
     )
 
 
-def _command(command_id: UUID | None = None, *, task: str = "fix") -> StartRun:
+def _command(
+    command_id: UUID | None = None,
+    *,
+    task: str = "fix",
+    profile: BudgetProfile = BudgetProfile.BASIC,
+    max_steps: int = 5,
+    model_budget: ModelBudget | None = None,
+) -> StartRun:
     return StartRun(
         command_id=command_id or uuid4(),
         task=task,
-        max_steps=5,
+        max_steps=max_steps,
         max_tool_calls=6,
         model_provider="mock",
-        model_budget=ModelBudget(max_model_requests=4, max_retries=1),
+        model_budget=model_budget or ModelBudget(max_model_requests=4, max_retries=1),
         workspace_root_identity="workspace-1",
         git_head=SHA_A,
         initial_source_digest=SHA_B,
         digest_algorithm_version=1,
         config_digest=SHA_C,
         profile_digest=SHA_A,
-        repair_policy=_policy(),
+        repair_policy=_policy(profile),
         baseline_id=UUID(int=5),
         baseline_digest=SHA_B,
     )
@@ -158,6 +165,47 @@ def test_same_command_returns_same_complete_bundle(tmp_path: Path) -> None:
         assert event is not None and event.event_type == "RUN_CREATED"
         assert event.sequence_number == 1
     database.close()
+
+
+def test_swe_bench_pass1_budget_binding_survives_database_reopen(tmp_path: Path) -> None:
+    path = tmp_path / "swe-bench-pass1.sqlite3"
+    database, workflow = _workflow(path)
+    command = _command(
+        UUID(int=901),
+        profile=BudgetProfile.SWE_BENCH_PASS1,
+        max_steps=80,
+        model_budget=ModelBudget(
+            max_model_requests=52,
+            max_retries=2,
+            max_output_tokens_per_request=4096,
+            max_total_tokens=600000,
+        ),
+    )
+    created = workflow.create(command)
+    database.close()
+
+    reopened = Database.from_path(path)
+    with reopened.session() as session:
+        policy = session.get(RepairTaskPolicyRow, str(created.run_id))
+        run = session.get(RunRow, str(created.run_id))
+        model = session.get(ModelRuntimeStateRow, str(created.run_id))
+        assert policy is not None and run is not None and model is not None
+        assert policy.policy_data["budget_profile"] == BudgetProfile.SWE_BENCH_PASS1.value
+        assert tuple(policy.policy_data[field] for field in (
+            "max_model_calls",
+            "max_read_calls",
+            "max_edit_attempts",
+            "max_test_runs",
+            "max_completion_corrections",
+            "max_policy_violations",
+            "max_wall_time_seconds",
+        )) == (50, 80, 8, 8, 2, 3, 1800)
+        assert run.max_steps == 80
+        assert model.max_model_requests == 52
+        assert model.max_retries == 2
+        assert model.max_output_tokens_per_request == 4096
+        assert model.max_total_tokens == 600000
+    reopened.close()
 
 
 def test_same_id_with_changed_request_is_conflict(tmp_path: Path) -> None:

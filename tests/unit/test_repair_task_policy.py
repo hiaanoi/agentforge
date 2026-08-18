@@ -43,6 +43,7 @@ def policy_for(
         (BudgetProfile.BASIC, (6, 20, 2, 3, 1, 2, 300)),
         (BudgetProfile.ENGINEERING, (10, 35, 4, 5, 1, 2, 600)),
         (BudgetProfile.CHALLENGE, (14, 50, 6, 7, 1, 2, 900)),
+        (BudgetProfile.SWE_BENCH_PASS1, (50, 80, 8, 8, 2, 3, 1800)),
     ],
 )
 def test_fixed_budget_profiles_cannot_drift(
@@ -112,6 +113,23 @@ def test_policy_rejects_unsafe_path_patterns(invalid_path: str) -> None:
 def test_policy_rejects_budget_override() -> None:
     with pytest.raises(ValidationError, match="fixed budget"):
         policy_for(max_model_calls=999)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "max_model_calls",
+        "max_read_calls",
+        "max_edit_attempts",
+        "max_test_runs",
+        "max_completion_corrections",
+        "max_policy_violations",
+        "max_wall_time_seconds",
+    ],
+)
+def test_swe_bench_pass1_policy_rejects_every_budget_override(field_name: str) -> None:
+    with pytest.raises(ValidationError, match="fixed budget"):
+        policy_for(budget_profile=BudgetProfile.SWE_BENCH_PASS1, **{field_name: 999})
 
 
 def test_policy_matching_is_case_folded_when_configured() -> None:
