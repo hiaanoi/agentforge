@@ -717,6 +717,11 @@ def test_docker_binding_requires_unique_matching_repo_digest() -> None:
         json.dumps([f"docker.io/swebench/example@sha256:{digest}"]),
     )
     assert binding.digest_reference == f"docker.io/swebench/example@sha256:{digest}"
+    docker_hub = DockerImageBinding.from_inspect(
+        "docker.io/swebench/example:latest",
+        json.dumps([f"swebench/example@sha256:{digest}"]),
+    )
+    assert docker_hub.digest_reference == f"docker.io/swebench/example@sha256:{digest}"
     with pytest.raises(CampaignExecutionError, match="unique"):
         DockerImageBinding.from_inspect(
             "docker.io/swebench/example:latest",

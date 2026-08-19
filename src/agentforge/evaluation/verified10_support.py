@@ -87,6 +87,7 @@ class DockerImageBinding:
     @classmethod
     def from_inspect(cls, tag: str, output: str) -> DockerImageBinding:
         repo = _image_repository(tag)
+        normalized_repo = _normalized_registry_repository(repo)
         try:
             decoded = json.loads(output)
         except json.JSONDecodeError:
@@ -102,24 +103,37 @@ class DockerImageBinding:
             values = [values]
         if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
             raise CampaignExecutionError("Docker image inspect did not return RepoDigests")
-        matching = {
-            value
-            for value in values
-            if re.fullmatch(re.escape(repo) + r"@sha256:[0-9a-f]{64}", value)
-        }
+        matching: set[str] = set()
+        for value in values:
+            candidate, separator, digest = value.partition("@")
+            if (
+                separator
+                and _normalized_registry_repository(candidate) == normalized_repo
+                and re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+            ):
+                matching.add(digest)
         if not matching:
             raise CampaignExecutionError(
                 "Docker image RepoDigest does not match requested repository"
             )
         if len(matching) != 1:
             raise CampaignExecutionError("Docker image must have one unique matching RepoDigest")
-        return cls(tag=tag, digest_reference=next(iter(matching)))
+        return cls(tag=tag, digest_reference=f"{repo}@{next(iter(matching))}")
 
 
 def _image_repository(tag: str) -> str:
     slash = tag.rfind("/")
     colon = tag.rfind(":")
     return tag[:colon] if colon > slash else tag
+
+
+def _normalized_registry_repository(value: str) -> str:
+    normalized = value.casefold()
+    for prefix in ("docker.io/", "index.docker.io/"):
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix) :]
+            break
+    return normalized if "/" in normalized else f"library/{normalized}"
 
 
 def agentforge_config() -> str:
