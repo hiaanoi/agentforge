@@ -35,6 +35,11 @@ images, materializes independent arm workspaces, validates all public task
 hashes and Git commits, and runs AgentForge admission. Do not proceed unless its
 last three lines are exactly:
 
+By default preparation uses `~/SWE-bench/.venv/bin/python` for the public
+dataset loader. If dependencies are held in another pinned SWE-bench
+environment, pass its interpreter with `--dataset-python`; the public task
+hashes are still revalidated against the tracked protocol.
+
 ```text
 agentforge_admission=10/10
 safe_symlink_rejections=0

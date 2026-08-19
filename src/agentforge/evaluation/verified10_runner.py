@@ -230,7 +230,7 @@ class Verified10Campaign:
         return result
 
     @staticmethod
-    def _dataset_command(harness_root: Path | None = None) -> CampaignCommand:
+    def _dataset_command(dataset_python: Path | None = None) -> CampaignCommand:
         script = (
             "import json; from datasets import load_dataset; "
             "d=load_dataset('princeton-nlp/SWE-bench_Verified', split='test'); "
@@ -239,20 +239,7 @@ class Verified10Campaign:
         )
         environment = dict(os.environ)
         environment.setdefault("HF_ENDPOINT", "https://huggingface.co")
-        argv = (
-            (
-                "uv",
-                "run",
-                "--project",
-                str(harness_root),
-                "--frozen",
-                "python",
-                "-c",
-                script,
-            )
-            if harness_root is not None
-            else (sys.executable, "-c", script)
-        )
+        argv = (str(dataset_python or sys.executable), "-c", script)
         return CampaignCommand(argv, environment=environment, timeout_seconds=600)
 
     def _inspect_image(self, tag: str, *, pull_if_missing: bool) -> DockerImageBinding:
@@ -279,7 +266,11 @@ class Verified10Campaign:
             )
         return DockerImageBinding.from_inspect(tag, result.stdout)
 
-    def prepare(self, harness_root: str | Path | None = None) -> None:
+    def prepare(
+        self,
+        harness_root: str | Path | None = None,
+        dataset_python: str | Path | None = None,
+    ) -> None:
         state = self._bootstrap_or_load()
         if state.prepared:
             return
@@ -291,9 +282,16 @@ class Verified10Campaign:
             PinnedHarnessVerifier().verify(harness)
         elif isinstance(self.runner, SubprocessCommandRunner):
             raise CampaignExecutionError("prepare requires a pinned --harness-root")
+        executable: Path | None = None
+        if dataset_python is not None:
+            executable = Path(dataset_python).resolve(strict=True)
+        elif harness is not None:
+            executable = (harness / ".venv" / "bin" / "python").resolve(strict=True)
+        if executable is not None and not executable.is_file():
+            raise CampaignExecutionError("Verified dataset Python is unavailable")
         try:
             decoded = json.loads(
-                self._run(self._dataset_command(harness), label="dataset").stdout
+                self._run(self._dataset_command(executable), label="dataset").stdout
             )
             if not isinstance(decoded, list) or any(not isinstance(row, dict) for row in decoded):
                 raise ValueError
