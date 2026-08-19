@@ -177,6 +177,11 @@ def _product_runtime(
                     "expected_sha256": hashlib.sha256(b"value = 1\n").hexdigest(),
                 },
             },
+            {
+                "type": "tool_call",
+                "tool": "run_tests",
+                "arguments": {"profile_id": "visible"},
+            },
             {"type": "final", "answer": "verified repair"},
         ]
     )
@@ -335,11 +340,24 @@ async def test_product_runtime_executes_final_capsule_after_regular_mutation(
         )
         await _collect(app.stream(ResumeRun(command_id=uuid4(), run_id=run_id)))
 
+        pending = app.query(PendingApprovals(run_id=run_id)).approvals
+        assert len(pending) == 1
+        await _collect(
+            app.stream(
+                DecideApproval(
+                    command_id=uuid4(),
+                    approval_id=pending[0].approval_id,
+                    status=ApprovalStatus.APPROVED,
+                )
+            )
+        )
+        await _collect(app.stream(ResumeRun(command_id=uuid4(), run_id=run_id)))
+
         executions = components.test_coordinator.list_executions(run_id)
-        assert len(executions) == 1
-        assert executions[0].capsule_state is VerificationCapsuleState.SEALED
-        assert len(supervisor_factory.launched_profiles) == 1
-        launched = supervisor_factory.launched_profiles[0]
+        assert len(executions) == 2
+        assert executions[-1].capsule_state is VerificationCapsuleState.SEALED
+        assert len(supervisor_factory.launched_profiles) == 2
+        launched = supervisor_factory.launched_profiles[-1]
         capsule_source = Path(launched.cwd)
         assert capsule_source.name == "source"
         assert Path(launched.argv[-1]) == capsule_source.parent / "verifier"
