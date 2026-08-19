@@ -71,7 +71,13 @@ def main(
         campaign = campaign_factory(args.protocol, args.output_dir)
         if args.command == "prepare":
             campaign.prepare()  # type: ignore[attr-defined]
-            print("admission=10/10")
+            summary = campaign.preflight_summary()  # type: ignore[attr-defined]
+            for key in (
+                "agentforge_admission",
+                "safe_symlink_rejections",
+                "protocol_sha256",
+            ):
+                print(f"{key}={summary[key]}")
         elif args.command == "run-agentforge":
             campaign.run_agentforge(  # type: ignore[attr-defined]
                 recover_running=args.recover_running, retry_failed=args.retry_failed

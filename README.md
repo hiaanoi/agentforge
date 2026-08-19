@@ -113,6 +113,36 @@ GitHub 录制版展示同一条公开 Core CLI 路径：trust、跨进程 approv
 深入设计：[评测指南](docs/evaluation_guide.md)、[7-B2.4 报告](docs/milestone_07b2_4_report.md)、
 [实现历史索引](docs/implementation_plan.md)。
 
+### 官方 Verified-10 对比复跑
+
+仓库现在包含一条冻结、可恢复的公开基准路径：同一组 10 个
+SWE-bench Verified 任务、同一 `deepseek-v4-flash`、一次尝试，分别运行 AgentForge 与
+mini-SWE-agent，再交给 pinned 官方 harness 评分。它不会把空 patch、超时或运行失败从分母中
+删除。
+
+云端建议至少使用 8 vCPU、32 GiB 内存和 200 GiB SSD；执行 `prepare` 前保留 160 GiB 以上
+可用空间。模型 arm 必须串行运行，并放在 `tmux` 中。腾讯云网页终端断开后重新登录，执行
+`tmux attach -t verified10`；campaign state 会跳过已终止任务，并要求对中断任务显式使用
+`--recover-running`。
+
+核心顺序如下（`<published-commit>` 是发布后记录的 AgentForge commit）：
+
+```bash
+git checkout <published-commit> && uv sync --frozen
+python evaluation/run_verified10_comparison.py prepare --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json --output-dir ~/verified10-pass1
+python evaluation/run_verified10_comparison.py run-agentforge --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json --output-dir ~/verified10-pass1
+python evaluation/run_verified10_comparison.py finalize-predictions --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json --output-dir ~/verified10-pass1 --arm AGENTFORGE
+python evaluation/run_verified10_comparison.py run-mini --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json --output-dir ~/verified10-pass1 --mini-root ~/mini-swe-agent
+python evaluation/run_verified10_comparison.py finalize-predictions --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json --output-dir ~/verified10-pass1 --arm MINI_SWE_AGENT
+python evaluation/run_verified10_comparison.py score --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json --output-dir ~/verified10-pass1 --arm AGENTFORGE --harness-root ~/SWE-bench
+python evaluation/run_verified10_comparison.py score --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json --output-dir ~/verified10-pass1 --arm MINI_SWE_AGENT --harness-root ~/SWE-bench
+python evaluation/run_verified10_comparison.py report --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json --output-dir ~/verified10-pass1
+```
+
+不要把 API key 写入命令、YAML、`.env` 或 shell history。使用隐藏输入在当前 `tmux` shell 中
+设置 `DEEPSEEK_API_KEY`。完整的 pinned mini/SWE-bench checkout、预检、恢复、评分和证据复制
+步骤见 [Verified-10 Pass 1 手册](docs/evaluation/verified10-pass1-reporting.md)。
+
 ### 可安装的 A2 Core CLI
 
 wheel 暴露 `agentforge` console script，并提供：

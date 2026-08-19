@@ -6,6 +6,72 @@ This campaign compares AgentForge and mini-SWE-agent on the same frozen ten
 1,800-second wall limit. The tracked protocol is
 `evaluation/protocols/verified10-deepseek-flash-pass1.json`.
 
+## Tencent Cloud execution
+
+Use Ubuntu 22.04 with Docker, 8 vCPU, 32 GiB RAM, a 200 GiB SSD, and at least
+160 GiB free before preparation. Clone three repositories and bind the exact
+commits before starting:
+
+```bash
+git -C ~/agentforge checkout <published-agentforge-commit>
+git -C ~/mini-swe-agent checkout 25941c89cfbc91eb40b3f8756348c91d9977d57e
+git -C ~/SWE-bench checkout 4e6126978a16bdfebc6538db8f28cacc2c8b77dc
+uv sync --project ~/agentforge --frozen
+uv sync --project ~/mini-swe-agent --frozen
+uv sync --project ~/SWE-bench --frozen
+```
+
+Run inside a persistent terminal and enter the DeepSeek key without echoing it
+or placing its value in shell history:
+
+```bash
+tmux new -s verified10
+read -rsp 'DeepSeek API key: ' DEEPSEEK_API_KEY && echo && export DEEPSEEK_API_KEY
+cd ~/agentforge
+```
+
+Preparation performs no model calls. It pulls and digest-binds all ten official
+images, materializes independent arm workspaces, validates all public task
+hashes and Git commits, and runs AgentForge admission. Do not proceed unless its
+last three lines are exactly:
+
+```text
+agentforge_admission=10/10
+safe_symlink_rejections=0
+protocol_sha256=d57db5029157ff9eea5f722c8977834ff98e7facd24eec7470e7fbcb48e3d231
+```
+
+```bash
+python evaluation/run_verified10_comparison.py prepare \
+  --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json \
+  --output-dir ~/verified10-pass1
+
+python evaluation/run_verified10_comparison.py run-agentforge \
+  --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json \
+  --output-dir ~/verified10-pass1
+python evaluation/run_verified10_comparison.py finalize-predictions \
+  --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json \
+  --output-dir ~/verified10-pass1 --arm AGENTFORGE
+
+python evaluation/run_verified10_comparison.py run-mini \
+  --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json \
+  --output-dir ~/verified10-pass1 --mini-root ~/mini-swe-agent
+python evaluation/run_verified10_comparison.py finalize-predictions \
+  --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json \
+  --output-dir ~/verified10-pass1 --arm MINI_SWE_AGENT
+```
+
+Run the arms sequentially. After a web-terminal disconnect, reconnect and use
+`tmux attach -t verified10`. Check state with the `status` subcommand. If state
+contains a `RUNNING` task, rerun that arm with `--recover-running`; the protocol
+does not permit `--retry-failed` because it fixes one model attempt per task.
+
+Before shutting down the ephemeral VM, copy the whole output directory—or at
+minimum `artifact-manifest.json`, both comparison files, both prediction files,
+both private ledgers, raw official reports, harness logs, and trajectories—to
+persistent storage. Then clear the key from the shell with
+`unset DEEPSEEK_API_KEY`.
+
 ## What counts as a score
 
 Only the pinned official SWE-bench harness decides whether an instance is

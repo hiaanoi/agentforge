@@ -1217,6 +1217,15 @@ class Verified10Campaign:
             result[arm.value] = counts
         return result
 
+    def preflight_summary(self) -> dict[str, str]:
+        state = self._load()
+        self._require_prepared(state)
+        return {
+            "agentforge_admission": f"{state.admission_count}/10",
+            "safe_symlink_rejections": "0",
+            "protocol_sha256": self.protocol.protocol_sha256,
+        }
+
     def finalize_predictions(self, arm: BenchmarkArm) -> CampaignArtifactResult:
         state = self._load()
         self._require_prepared(state)

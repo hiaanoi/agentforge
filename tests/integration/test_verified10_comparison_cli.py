@@ -533,6 +533,9 @@ def test_cli_main_uses_fake_campaign_and_stable_domain_errors(
         def prepare(self) -> None:
             raise CampaignExecutionError("stable campaign error")
 
+        def preflight_summary(self) -> dict[str, str]:
+            raise AssertionError("failed prepare must not emit a summary")
+
     result = main(
         ["prepare", "--protocol", str(PROTOCOL), "--output-dir", str(tmp_path / "out")],
         campaign_factory=FakeCampaign,
@@ -571,6 +574,13 @@ def test_cli_main_dispatches_every_campaign_command_with_fake_runner(
         def prepare(self) -> None:
             calls.append("prepare")
 
+        def preflight_summary(self) -> dict[str, str]:
+            return {
+                "agentforge_admission": "10/10",
+                "safe_symlink_rejections": "0",
+                "protocol_sha256": "a" * 64,
+            }
+
         def run_agentforge(self, **kwargs: object) -> None:
             calls.append("agentforge")
 
@@ -601,4 +611,45 @@ def test_cli_main_dispatches_every_campaign_command_with_fake_runner(
     assert calls == [expected]
     assert "Traceback" not in captured.err
     if expected == "prepare":
-        assert captured.out == "admission=10/10\n"
+        assert captured.out.splitlines() == [
+            "agentforge_admission=10/10",
+            "safe_symlink_rejections=0",
+            f"protocol_sha256={'a' * 64}",
+        ]
+
+
+def test_cli_prepare_prints_linux_preflight_contract(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class PreparedCampaign:
+        def __init__(self, protocol: Path, output: Path) -> None:
+            pass
+
+        def prepare(self) -> None:
+            pass
+
+        def preflight_summary(self) -> dict[str, str]:
+            return {
+                "agentforge_admission": "10/10",
+                "safe_symlink_rejections": "0",
+                "protocol_sha256": "a" * 64,
+            }
+
+    assert (
+        main(
+            [
+                "prepare",
+                "--protocol",
+                str(PROTOCOL),
+                "--output-dir",
+                str(tmp_path / "out"),
+            ],
+            campaign_factory=PreparedCampaign,
+        )
+        == 0
+    )
+    assert capsys.readouterr().out.splitlines() == [
+        "agentforge_admission=10/10",
+        "safe_symlink_rejections=0",
+        f"protocol_sha256={'a' * 64}",
+    ]
