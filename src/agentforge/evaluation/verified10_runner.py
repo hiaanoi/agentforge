@@ -777,9 +777,12 @@ class Verified10Campaign:
     def _preflight_agentforge(self, workspace: Path, task: Verified10Task) -> None:
         directory = workspace / ".agentforge"
         directory.mkdir(exist_ok=True)
+        verifier = self.root / "verifiers" / task.instance_id
+        verifier.mkdir(parents=True, exist_ok=False)
         self._atomic(directory / "config.toml", self._agentforge_config().encode())
         self._atomic(
-            directory / "runtime.toml", self._agentforge_runtime(task.instance_id).encode()
+            directory / "runtime.toml",
+            self._agentforge_runtime(task.instance_id, verifier).encode(),
         )
         try:
             loader = ProductConfigLoader(user_root=self.root / ".no-user-config")

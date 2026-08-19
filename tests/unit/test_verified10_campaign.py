@@ -40,6 +40,8 @@ from agentforge.evaluation.verified10_runner import (
     Verified10Campaign,
     select_and_validate_public_rows,
 )
+from agentforge.tools.paths import WorkspacePathResolver
+from agentforge.tools.testing.profiles import TestProfileRegistry as ProfileRegistry
 
 ROOT = Path(__file__).parents[2]
 PROTOCOL_PATH = ROOT / "evaluation" / "protocols" / "verified10-deepseek-flash-pass1.json"
@@ -793,7 +795,11 @@ def test_generated_agentforge_files_pass_product_loaders_without_secrets(
     config_dir = workspace / ".agentforge"
     config_dir.mkdir()
     config_text = Verified10Campaign._agentforge_config()
-    runtime_text = Verified10Campaign._agentforge_runtime(EXPECTED_INSTANCE_IDS[0])
+    verifier = tmp_path / "verifier"
+    verifier.mkdir()
+    runtime_text = Verified10Campaign._agentforge_runtime(
+        EXPECTED_INSTANCE_IDS[0], verifier
+    )
     (config_dir / "config.toml").write_text(config_text, encoding="utf-8")
     (config_dir / "runtime.toml").write_text(runtime_text, encoding="utf-8")
 
@@ -807,6 +813,9 @@ def test_generated_agentforge_files_pass_product_loaders_without_secrets(
         },
     )
     runtime = ProductRuntimeDefinitionLoader().load(workspace, config=config)
+    registry = ProfileRegistry(WorkspacePathResolver(workspace))
+    for profile in runtime.profiles:
+        registry.register(profile)
 
     assert config.model == "deepseek-v4-flash"
     assert config.max_steps == 80
@@ -822,3 +831,14 @@ def test_generated_agentforge_files_pass_product_loaders_without_secrets(
     assert "api_key" not in (config_text + runtime_text).casefold()
     assert "timeout_seconds = 600.0" in runtime_text
     assert "temperature = 0.0" in runtime_text
+    assert tuple(profile.profile_id for profile in registry.list_enabled()) == (
+        "compile",
+        "verify",
+    )
+
+
+def test_mini_config_ignores_unmapped_provider_pricing_without_changing_budget() -> None:
+    config = Verified10Campaign._mini_config()
+    assert "cost_tracking: ignore_errors" in config
+    assert "step_limit: 50" in config
+    assert "cost_limit: 0.0" in config

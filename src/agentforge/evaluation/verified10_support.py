@@ -153,14 +153,16 @@ def mini_config() -> str:
         "    drop_params: true\n    parallel_tool_calls: false\n"
         "    api_base: https://api.deepseek.com/v1\n    temperature: 0\n"
         "    extra_body:\n      thinking:\n        type: disabled\n"
+        "  cost_tracking: ignore_errors\n"
         "environment:\n  cwd: /testbed\n  timeout: 120\n"
         '  run_args: ["--rm", "--network=none"]\n'
         "  container_timeout: 2h\n  pull_timeout: 1800\n"
     )
 
 
-def agentforge_runtime(task_id: str) -> str:
+def agentforge_runtime(task_id: str, verifier_root: Path) -> str:
     python = str(Path(sys.executable).resolve(strict=True)).replace("\\", "/")
+    verifier = str(verifier_root.resolve(strict=True)).replace("\\", "/")
     return f'''[provider]
 kind = "deepseek"
 timeout_seconds = 600.0
@@ -207,12 +209,13 @@ profile_id = "verify"
 name = "Verification capability"
 description = "Final syntax verification; official scoring is external"
 executable = "{python}"
-argv = ["-m", "compileall", "-q", "."]
+argv = ["-m", "compileall", "-q", "{{SOURCE}}"]
 cwd = "."
 timeout_seconds = 120
 max_output_bytes = 4096
 profile_version = 1
 purpose = "verification"
+verifier_root = "{verifier}"
 '''
 
 
