@@ -674,12 +674,43 @@ def _scan_workspace_for_nested_git(
                         continue
                     raise OSError("nested Git control path is unsupported")
                 metadata = entry.stat(follow_symlinks=False)
+                if stat.S_ISLNK(metadata.st_mode):
+                    _validate_inert_workspace_symlink(
+                        workspace, Path(entry.path), metadata
+                    )
+                    continue
                 if _is_link_or_reparse(metadata):
-                    raise OSError("workspace traversal link is unsupported")
+                    raise OSError("workspace traversal reparse point is unsupported")
                 if stat.S_ISDIR(metadata.st_mode):
                     pending.append(Path(entry.path))
                 elif not stat.S_ISREG(metadata.st_mode):
                     raise OSError("workspace special path is unsupported")
+
+
+def _validate_inert_workspace_symlink(
+    workspace: Path,
+    path: Path,
+    scanned: os.stat_result,
+) -> None:
+    """Admit one internal POSIX link as metadata without following its target."""
+
+    if os.name != "posix" or not stat.S_ISLNK(scanned.st_mode):
+        raise OSError("workspace links require POSIX symlink semantics")
+    if getattr(scanned, "st_file_attributes", 0) & 0x400:
+        raise OSError("workspace reparse points are unsupported")
+    before = os.lstat(path)
+    if _path_identity(before) != _path_identity(scanned):
+        raise OSError("workspace symlink identity changed")
+    target = os.readlink(path)
+    if not target or "\x00" in target or os.path.isabs(target):
+        raise OSError("workspace symlink target is unsafe")
+    root_key = os.path.normcase(os.path.abspath(workspace))
+    target_key = os.path.normcase(os.path.abspath(os.path.join(path.parent, target)))
+    if os.path.commonpath((root_key, target_key)) != root_key:
+        raise OSError("workspace symlink target escaped")
+    after = os.lstat(path)
+    if _path_identity(after) != _path_identity(before) or os.readlink(path) != target:
+        raise OSError("workspace symlink changed during scan")
 
 
 def _capture_submodule_indicators(

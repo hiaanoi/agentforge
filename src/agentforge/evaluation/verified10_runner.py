@@ -1012,7 +1012,8 @@ class Verified10Campaign:
                             "approve",
                             *common,
                             approval_id,
-                        )
+                        ),
+                        acceptable_returncodes=frozenset({0, 20}),
                     ),
                     label="agentforge approve",
                 )
