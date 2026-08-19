@@ -449,7 +449,14 @@ class VerificationCapsuleBuilder:
             target_stat = os.fstat(target_fd)
             if target_stat.st_nlink != 1 or target_stat.st_size != total:
                 raise WorkspaceDigestError()
-            return total, digest.hexdigest()
+            copied_digest = digest.hexdigest()
+            # Same-size rewrites can evade metadata-only checks on filesystems with
+            # coarse timestamp behavior. Bind the copied bytes to a second hardened
+            # read of the current source before publishing the capsule.
+            current = self._digester._read_regular_file(source, path_after)
+            if self._digester.content_digest(current) != copied_digest:
+                raise WorkspaceDigestError()
+            return total, copied_digest
         finally:
             if target_fd is not None:
                 os.close(target_fd)

@@ -146,7 +146,7 @@ def mini_config() -> str:
 
 
 def agentforge_runtime(task_id: str) -> str:
-    python = sys.executable.replace("\\", "/")
+    python = str(Path(sys.executable).resolve(strict=True)).replace("\\", "/")
     return f'''[provider]
 kind = "deepseek"
 timeout_seconds = 600.0

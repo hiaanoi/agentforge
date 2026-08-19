@@ -148,7 +148,7 @@ def _product_runtime(
                 profile_id=profile_id,
                 name=profile_id,
                 description=f"{profile_id} profile",
-                executable=sys.executable,
+                executable=str(Path(sys.executable).resolve(strict=True)),
                 argv=argv,
                 cwd=".",
                 timeout_seconds=10,

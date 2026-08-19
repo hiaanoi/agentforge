@@ -423,7 +423,7 @@ def test_capsule_launch_profile_runs_captured_verifier_against_captured_source(
             profile_id="hidden_smoke",
             name="Hidden smoke",
             description="Run captured verifier",
-            executable=sys.executable,
+            executable=str(Path(sys.executable).resolve(strict=True)),
             argv=("{VERIFIER}/hidden_test.py",),
             cwd=".",
             allowed_env={},
