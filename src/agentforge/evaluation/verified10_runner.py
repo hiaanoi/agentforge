@@ -284,9 +284,9 @@ class Verified10Campaign:
             raise CampaignExecutionError("prepare requires a pinned --harness-root")
         executable: Path | None = None
         if dataset_python is not None:
-            executable = Path(dataset_python).resolve(strict=True)
+            executable = Path(dataset_python).absolute()
         elif harness is not None:
-            executable = (harness / ".venv" / "bin" / "python").resolve(strict=True)
+            executable = (harness / ".venv" / "bin" / "python").absolute()
         if executable is not None and not executable.is_file():
             raise CampaignExecutionError("Verified dataset Python is unavailable")
         try:

@@ -740,6 +740,12 @@ def test_campaign_command_repr_never_contains_environment_values() -> None:
     assert command.environment_names == ("OPENAI_API_KEY",)
 
 
+def test_dataset_command_preserves_the_virtual_environment_entrypoint() -> None:
+    executable = Path("/pinned/SWE-bench/.venv/bin/python")
+    command = Verified10Campaign._dataset_command(executable)
+    assert command.argv[0] == str(executable)
+
+
 def test_real_mini_source_verifier_rejects_commit_and_lock_mismatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
