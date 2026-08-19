@@ -55,6 +55,8 @@ def build_parser() -> argparse.ArgumentParser:
             )
         if name == "score":
             item.add_argument("--harness-root", required=True, type=Path)
+        if name == "prepare":
+            item.add_argument("--harness-root", required=True, type=Path)
     return parser
 
 
@@ -70,7 +72,7 @@ def main(
     try:
         campaign = campaign_factory(args.protocol, args.output_dir)
         if args.command == "prepare":
-            campaign.prepare()  # type: ignore[attr-defined]
+            campaign.prepare(harness_root=args.harness_root)  # type: ignore[attr-defined]
             summary = campaign.preflight_summary()  # type: ignore[attr-defined]
             for key in (
                 "agentforge_admission",

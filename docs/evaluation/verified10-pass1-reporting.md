@@ -44,7 +44,7 @@ protocol_sha256=d57db5029157ff9eea5f722c8977834ff98e7facd24eec7470e7fbcb48e3d231
 ```bash
 python evaluation/run_verified10_comparison.py prepare \
   --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json \
-  --output-dir ~/verified10-pass1
+  --output-dir ~/verified10-pass1 --harness-root ~/SWE-bench
 
 python evaluation/run_verified10_comparison.py run-agentforge \
   --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json \

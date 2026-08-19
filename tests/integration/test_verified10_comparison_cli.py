@@ -530,14 +530,22 @@ def test_cli_main_uses_fake_campaign_and_stable_domain_errors(
         def __init__(self, protocol: Path, output: Path) -> None:
             calls.extend((str(protocol), str(output)))
 
-        def prepare(self) -> None:
+        def prepare(self, **kwargs: object) -> None:
             raise CampaignExecutionError("stable campaign error")
 
         def preflight_summary(self) -> dict[str, str]:
             raise AssertionError("failed prepare must not emit a summary")
 
     result = main(
-        ["prepare", "--protocol", str(PROTOCOL), "--output-dir", str(tmp_path / "out")],
+        [
+            "prepare",
+            "--harness-root",
+            str(MINI_ROOT),
+            "--protocol",
+            str(PROTOCOL),
+            "--output-dir",
+            str(tmp_path / "out"),
+        ],
         campaign_factory=FakeCampaign,
     )
     captured = capsys.readouterr()
@@ -550,7 +558,7 @@ def test_cli_main_uses_fake_campaign_and_stable_domain_errors(
 @pytest.mark.parametrize(
     ("argv", "expected"),
     [
-        (["prepare"], "prepare"),
+        (["prepare", "--harness-root", str(MINI_ROOT)], "prepare"),
         (["run-agentforge"], "agentforge"),
         (["run-mini", "--mini-root", str(MINI_ROOT)], "mini"),
         (["status"], "status"),
@@ -571,7 +579,7 @@ def test_cli_main_dispatches_every_campaign_command_with_fake_runner(
         def __init__(self, protocol: Path, output: Path) -> None:
             return None
 
-        def prepare(self) -> None:
+        def prepare(self, **kwargs: object) -> None:
             calls.append("prepare")
 
         def preflight_summary(self) -> dict[str, str]:
@@ -625,7 +633,7 @@ def test_cli_prepare_prints_linux_preflight_contract(
         def __init__(self, protocol: Path, output: Path) -> None:
             pass
 
-        def prepare(self) -> None:
+        def prepare(self, **kwargs: object) -> None:
             pass
 
         def preflight_summary(self) -> dict[str, str]:
@@ -639,6 +647,8 @@ def test_cli_prepare_prints_linux_preflight_contract(
         main(
             [
                 "prepare",
+                "--harness-root",
+                str(MINI_ROOT),
                 "--protocol",
                 str(PROTOCOL),
                 "--output-dir",

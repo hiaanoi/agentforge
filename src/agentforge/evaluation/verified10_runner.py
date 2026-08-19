@@ -230,7 +230,7 @@ class Verified10Campaign:
         return result
 
     @staticmethod
-    def _dataset_command() -> CampaignCommand:
+    def _dataset_command(harness_root: Path | None = None) -> CampaignCommand:
         script = (
             "import json; from datasets import load_dataset; "
             "d=load_dataset('princeton-nlp/SWE-bench_Verified', split='test'); "
@@ -239,9 +239,21 @@ class Verified10Campaign:
         )
         environment = dict(os.environ)
         environment.setdefault("HF_ENDPOINT", "https://huggingface.co")
-        return CampaignCommand(
-            (sys.executable, "-c", script), environment=environment, timeout_seconds=600
+        argv = (
+            (
+                "uv",
+                "run",
+                "--project",
+                str(harness_root),
+                "--frozen",
+                "python",
+                "-c",
+                script,
+            )
+            if harness_root is not None
+            else (sys.executable, "-c", script)
         )
+        return CampaignCommand(argv, environment=environment, timeout_seconds=600)
 
     def _inspect_image(self, tag: str, *, pull_if_missing: bool) -> DockerImageBinding:
         inspect = CampaignCommand(
@@ -267,12 +279,22 @@ class Verified10Campaign:
             )
         return DockerImageBinding.from_inspect(tag, result.stdout)
 
-    def prepare(self) -> None:
+    def prepare(self, harness_root: str | Path | None = None) -> None:
         state = self._bootstrap_or_load()
         if state.prepared:
             return
+        harness: Path | None = None
+        if harness_root is not None:
+            from agentforge.evaluation.verified10_reporting import PinnedHarnessVerifier
+
+            harness = Path(harness_root).resolve(strict=True)
+            PinnedHarnessVerifier().verify(harness)
+        elif isinstance(self.runner, SubprocessCommandRunner):
+            raise CampaignExecutionError("prepare requires a pinned --harness-root")
         try:
-            decoded = json.loads(self._run(self._dataset_command(), label="dataset").stdout)
+            decoded = json.loads(
+                self._run(self._dataset_command(harness), label="dataset").stdout
+            )
             if not isinstance(decoded, list) or any(not isinstance(row, dict) for row in decoded):
                 raise ValueError
             rows = select_and_validate_public_rows(decoded, self.protocol)

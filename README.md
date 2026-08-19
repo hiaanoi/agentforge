@@ -129,7 +129,7 @@ mini-SWE-agent，再交给 pinned 官方 harness 评分。它不会把空 patch�
 
 ```bash
 git checkout <published-commit> && uv sync --frozen
-python evaluation/run_verified10_comparison.py prepare --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json --output-dir ~/verified10-pass1
+python evaluation/run_verified10_comparison.py prepare --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json --output-dir ~/verified10-pass1 --harness-root ~/SWE-bench
 python evaluation/run_verified10_comparison.py run-agentforge --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json --output-dir ~/verified10-pass1
 python evaluation/run_verified10_comparison.py finalize-predictions --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json --output-dir ~/verified10-pass1 --arm AGENTFORGE
 python evaluation/run_verified10_comparison.py run-mini --protocol evaluation/protocols/verified10-deepseek-flash-pass1.json --output-dir ~/verified10-pass1 --mini-root ~/mini-swe-agent
