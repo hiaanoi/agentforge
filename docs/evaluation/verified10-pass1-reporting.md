@@ -87,4 +87,3 @@ Calls, steps, tokens, wall time, and USD are not interchangeable. This pass
 raises both arms from the earlier 14-call smoke regime to a declared 50-call or
 50-step regime; it is a paired capability comparison, not a claim of
 cost-normalized leaderboard parity.
-
