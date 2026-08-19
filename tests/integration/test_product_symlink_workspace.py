@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import subprocess
 import sys
@@ -173,6 +174,7 @@ def _product_runtime(
                     "path": "src/module.py",
                     "old_text": "value = 1\n",
                     "new_text": "value = 2\n",
+                    "expected_sha256": hashlib.sha256(b"value = 1\n").hexdigest(),
                 },
             },
             {"type": "final", "answer": "verified repair"},
