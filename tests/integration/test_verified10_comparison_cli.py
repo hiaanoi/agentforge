@@ -198,6 +198,18 @@ def test_prepare_then_mini_then_finalize_is_local_and_secret_free(
     ]
     assert len(pulls) == 10
     assert len(inspections) == 30
+    resets = [
+        command
+        for command in runner.commands
+        if len(command.argv) >= 5 and command.argv[0] == "git" and command.argv[3] == "reset"
+    ]
+    cleans = [
+        command
+        for command in runner.commands
+        if len(command.argv) >= 5 and command.argv[0] == "git" and command.argv[3] == "clean"
+    ]
+    assert len(resets) == 20
+    assert len(cleans) == 20
     assert len(creates) == 20
     assert all(
         "@sha256:" in command.argv[-1] and not command.argv[-1].endswith(":latest")

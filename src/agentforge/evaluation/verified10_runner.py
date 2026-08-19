@@ -336,6 +336,16 @@ class Verified10Campaign:
                         self.runner.run(CampaignCommand(("docker", "rm", created)))
                     except (OSError, subprocess.SubprocessError):
                         pass
+                self._run(
+                    CampaignCommand(
+                        ("git", "-C", str(workspace), "reset", "--hard", task.base_commit)
+                    ),
+                    label="git reset",
+                )
+                self._run(
+                    CampaignCommand(("git", "-C", str(workspace), "clean", "-fd")),
+                    label="git clean",
+                )
                 head = self._git_head(workspace)
                 if head != task.base_commit:
                     raise CampaignExecutionError("Materialized workspace base commit mismatch")
