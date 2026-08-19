@@ -26,7 +26,15 @@ class CampaignFactory(Protocol):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="run_verified10_comparison")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("prepare", "run-agentforge", "run-mini", "status", "finalize-predictions"):
+    for name in (
+        "prepare",
+        "run-agentforge",
+        "run-mini",
+        "status",
+        "finalize-predictions",
+        "score",
+        "report",
+    ):
         item = commands.add_parser(name)
         item.add_argument("--protocol", required=True, type=Path)
         item.add_argument("--output-dir", required=True, type=Path)
@@ -41,10 +49,12 @@ def build_parser() -> argparse.ArgumentParser:
             item.add_argument(
                 "--mini-root", type=Path, default=os.environ.get("MINI_SWE_AGENT_ROOT")
             )
-        if name == "finalize-predictions":
+        if name in {"finalize-predictions", "score"}:
             item.add_argument(
                 "--arm", required=True, choices=tuple(arm.value for arm in BenchmarkArm)
             )
+        if name == "score":
+            item.add_argument("--harness-root", required=True, type=Path)
     return parser
 
 
@@ -76,8 +86,14 @@ def main(
             )
         elif args.command == "status":
             print(json.dumps(campaign.status(), sort_keys=True, separators=(",", ":")))  # type: ignore[attr-defined]
-        else:
+        elif args.command == "finalize-predictions":
             campaign.finalize_predictions(BenchmarkArm(args.arm))  # type: ignore[attr-defined]
+        elif args.command == "score":
+            campaign.score(  # type: ignore[attr-defined]
+                BenchmarkArm(args.arm), args.harness_root
+            )
+        else:
+            campaign.report()  # type: ignore[attr-defined]
         return 0
     except (CampaignExecutionError, CampaignArtifactError, Verified10ProtocolError, OSError) as exc:
         message = str(exc).strip() or "Verified-10 campaign failed"

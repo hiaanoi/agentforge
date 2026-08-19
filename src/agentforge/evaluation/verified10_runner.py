@@ -1297,6 +1297,24 @@ class Verified10Campaign:
         self._update(mark_final)
         return result
 
+    def score(self, arm: BenchmarkArm, harness_root: str | Path) -> object:
+        from agentforge.evaluation.verified10_reporting import Verified10Reporting
+
+        return Verified10Reporting(
+            self.protocol_path,
+            self.root,
+            runner=self.runner,
+        ).score(arm, harness_root)
+
+    def report(self) -> object:
+        from agentforge.evaluation.verified10_reporting import Verified10Reporting
+
+        return Verified10Reporting(
+            self.protocol_path,
+            self.root,
+            runner=self.runner,
+        ).report()
+
 
 def _nonnegative_int(value: object) -> int | None:
     return value if type(value) is int and value >= 0 else None

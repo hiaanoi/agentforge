@@ -552,6 +552,8 @@ def test_cli_main_uses_fake_campaign_and_stable_domain_errors(
         (["run-mini", "--mini-root", str(MINI_ROOT)], "mini"),
         (["status"], "status"),
         (["finalize-predictions", "--arm", "AGENTFORGE"], "finalize"),
+        (["score", "--arm", "AGENTFORGE", "--harness-root", str(MINI_ROOT)], "score"),
+        (["report"], "report"),
     ],
 )
 def test_cli_main_dispatches_every_campaign_command_with_fake_runner(
@@ -581,6 +583,14 @@ def test_cli_main_dispatches_every_campaign_command_with_fake_runner(
 
         def finalize_predictions(self, arm: BenchmarkArm) -> None:
             calls.append("finalize")
+
+        def score(self, arm: BenchmarkArm, harness_root: Path) -> None:
+            assert arm is BenchmarkArm.AGENTFORGE
+            assert harness_root == MINI_ROOT
+            calls.append("score")
+
+        def report(self) -> None:
+            calls.append("report")
 
     result = main(
         [*argv, "--protocol", str(PROTOCOL), "--output-dir", str(tmp_path / "out")],
