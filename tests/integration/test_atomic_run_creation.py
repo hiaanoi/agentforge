@@ -208,6 +208,43 @@ def test_swe_bench_pass1_budget_binding_survives_database_reopen(tmp_path: Path)
     reopened.close()
 
 
+def test_swe_ablation_budget_binding_survives_database_reopen(tmp_path: Path) -> None:
+    path = tmp_path / "swe-ablation.sqlite3"
+    database, workflow = _workflow(path)
+    command = _command(
+        UUID(int=902),
+        profile=BudgetProfile.SWE_BENCH_ABLATION_100,
+        max_steps=160,
+        model_budget=ModelBudget(
+            max_model_requests=102,
+            max_retries=2,
+            max_output_tokens_per_request=4096,
+            max_total_tokens=1_200_000,
+        ),
+    )
+    created = workflow.create(command)
+    database.close()
+
+    reopened = Database.from_path(path)
+    with reopened.session() as session:
+        policy = session.get(RepairTaskPolicyRow, str(created.run_id))
+        model = session.get(ModelRuntimeStateRow, str(created.run_id))
+        assert policy is not None and model is not None
+        assert policy.policy_data["budget_profile"] == BudgetProfile.SWE_BENCH_ABLATION_100.value
+        assert tuple(policy.policy_data[field] for field in (
+            "max_model_calls",
+            "max_read_calls",
+            "max_edit_attempts",
+            "max_test_runs",
+            "max_completion_corrections",
+            "max_policy_violations",
+            "max_wall_time_seconds",
+        )) == (100, 160, 16, 16, 4, 6, 3600)
+        assert model.max_model_requests == 102
+        assert model.max_total_tokens == 1_200_000
+    reopened.close()
+
+
 def test_same_id_with_changed_request_is_conflict(tmp_path: Path) -> None:
     database, workflow = _workflow(tmp_path / "conflict.sqlite3")
     command_id = UUID(int=1)
