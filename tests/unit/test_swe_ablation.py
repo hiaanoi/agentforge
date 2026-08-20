@@ -17,3 +17,10 @@ def test_ablation_rejects_task_ids_outside_declared_set() -> None:
 
     with pytest.raises(CampaignExecutionError, match="declared ablation"):
         validate_ablation_task_ids(("sympy__sympy-16886",))
+
+
+def test_ablation_step_limit_respects_product_configuration_bound() -> None:
+    from agentforge.evaluation.swe_ablation import SWEAblationCampaign
+
+    assert SWEAblationCampaign._agentforge_max_steps == 100
+    assert SWEAblationCampaign._agentforge_max_model_requests == 102

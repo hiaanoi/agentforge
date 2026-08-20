@@ -35,7 +35,7 @@ class SWEAblationCampaign(Verified10Campaign):
     """Three-task AgentForge-only extension of the frozen Verified-10 protocol."""
 
     _agentforge_budget_profile = "SWE_BENCH_ABLATION_100"
-    _agentforge_max_steps = 160
+    _agentforge_max_steps = 100
     _agentforge_max_model_requests = 102
     _agentforge_max_total_tokens = 1_200_000
 
