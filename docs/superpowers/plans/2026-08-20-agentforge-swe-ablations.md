@@ -84,7 +84,8 @@ git commit -m "fix(runtime): terminalize repair state on generic failures"
 
 **Files:**
 - Modify: `src/agentforge/runtime/engine.py:1290-1385`
-- Modify: `src/agentforge/runtime/loop_detection.py`
+- Modify: `src/agentforge/context/loop.py`
+- Modify: `src/agentforge/context/models.py`
 - Test: `tests/unit/test_loop_detection.py`
 - Test: `tests/integration/test_runtime_loop_recovery.py`
 
@@ -145,7 +146,7 @@ uv run --frozen pytest tests/unit/test_loop_detection.py tests/integration/test_
 Then:
 
 ```bash
-git add src/agentforge/runtime/engine.py src/agentforge/runtime/loop_detection.py tests/unit/test_loop_detection.py tests/integration/test_runtime_loop_recovery.py
+git add src/agentforge/runtime/engine.py src/agentforge/context/loop.py src/agentforge/context/models.py tests/unit/test_loop_detection.py tests/integration/test_runtime_loop_recovery.py
 git commit -m "fix(runtime): tolerate bounded repeated reads"
 ```
 
