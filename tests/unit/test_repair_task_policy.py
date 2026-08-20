@@ -45,6 +45,7 @@ def policy_for(
         (BudgetProfile.CHALLENGE, (14, 50, 6, 7, 1, 2, 900)),
         (BudgetProfile.SWE_BENCH_PASS1, (50, 80, 8, 8, 2, 3, 1800)),
         (BudgetProfile.SWE_BENCH_ABLATION_100, (100, 160, 16, 16, 4, 6, 3600)),
+        (BudgetProfile.SWE_BENCH_PASS2, (100, 160, 16, 16, 4, 6, 3600)),
     ],
 )
 def test_fixed_budget_profiles_cannot_drift(
