@@ -210,19 +210,19 @@ class Verified10Task(_FrozenModel):
 
 
 class AgentForgeBudget(_FrozenModel):
-    repair_profile: Literal["SWE_BENCH_PASS1"]
-    logical_model_calls: Literal[50]
-    run_steps: Literal[80]
-    wall_time_seconds: Literal[1800]
-    provider_max_model_requests: Literal[52]
+    repair_profile: Literal["SWE_BENCH_PASS1", "SWE_BENCH_PASS2"]
+    logical_model_calls: Literal[50, 100]
+    run_steps: Literal[80, 100]
+    wall_time_seconds: Literal[1800, 3600]
+    provider_max_model_requests: Literal[52, 102]
     provider_max_retries: Literal[2]
     provider_max_output_tokens: Literal[4096]
     provider_timeout_ms: Literal[600000]
 
 
 class MiniSWEAgentBudget(_FrozenModel):
-    step_limit: Literal[50]
-    wall_time_seconds: Literal[1800]
+    step_limit: Literal[50, 100]
+    wall_time_seconds: Literal[1800, 3600]
     attempts: Literal[1]
     temperature: float
     network: Literal["none"]
@@ -277,7 +277,9 @@ class Prior14CallBaseline(_FrozenModel):
 
 class Verified10Protocol(_FrozenModel):
     schema_version: Literal[1]
-    protocol_name: Literal["verified10-deepseek-flash-pass1"]
+    protocol_name: Literal[
+        "verified10-deepseek-flash-pass1", "verified10-deepseek-flash-pass2"
+    ]
     dataset_name: Literal["princeton-nlp/SWE-bench_Verified"]
     dataset_split: Literal["test"]
     dataset_fingerprint: str = Field(min_length=1, max_length=200)
@@ -339,6 +341,28 @@ class Verified10Protocol(_FrozenModel):
             raise ValueError("dataset_fingerprint does not match the frozen selection")
         if self.source_selection_sha256 != _FROZEN_SOURCE_SELECTION_SHA256:
             raise ValueError("source_selection_sha256 does not match the frozen selection")
+        expected_budgets = {
+            "verified10-deepseek-flash-pass1": (
+                ("SWE_BENCH_PASS1", 50, 80, 1800, 52),
+                (50, 1800),
+            ),
+            "verified10-deepseek-flash-pass2": (
+                ("SWE_BENCH_PASS2", 100, 100, 3600, 102),
+                (100, 3600),
+            ),
+        }
+        agentforge_expected, mini_expected = expected_budgets[self.protocol_name]
+        if (
+            self.agentforge_budget.repair_profile,
+            self.agentforge_budget.logical_model_calls,
+            self.agentforge_budget.run_steps,
+            self.agentforge_budget.wall_time_seconds,
+            self.agentforge_budget.provider_max_model_requests,
+        ) != agentforge_expected or (
+            self.mini_budget.step_limit,
+            self.mini_budget.wall_time_seconds,
+        ) != mini_expected:
+            raise ValueError("protocol budget does not match the frozen pass")
         if len(self.budget_rationale) != 4:
             raise ValueError("budget_rationale must contain four official values")
         actual_rationale = tuple(

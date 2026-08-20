@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 from agentforge.evaluation.swebench_prediction import (
     SWEbenchPrediction,
@@ -38,6 +39,13 @@ class SWEAblationCampaign(Verified10Campaign):
     _agentforge_max_steps = 100
     _agentforge_max_model_requests = 102
     _agentforge_max_total_tokens = 1_200_000
+
+    def __init__(self, protocol_path: str | Path, output_dir: str | Path, **kwargs: Any) -> None:
+        super().__init__(protocol_path, output_dir, **kwargs)
+        self._agentforge_budget_profile = "SWE_BENCH_ABLATION_100"
+        self._agentforge_max_steps = 100
+        self._agentforge_max_model_requests = 102
+        self._agentforge_max_total_tokens = 1_200_000
 
     def run_agentforge(
         self,

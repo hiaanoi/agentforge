@@ -81,6 +81,14 @@ class Verified10Campaign:
         self.root = self._safe_root(Path(output_dir))
         self.runner = runner or SubprocessCommandRunner()
         self.mini_source_verifier = mini_source_verifier or MiniSourceVerifier()
+        self._agentforge_budget_profile = self.protocol.agentforge_budget.repair_profile
+        self._agentforge_max_steps = self.protocol.agentforge_budget.run_steps
+        self._agentforge_max_model_requests = (
+            self.protocol.agentforge_budget.provider_max_model_requests
+        )
+        self._agentforge_max_total_tokens = (
+            600000 if self.protocol.agentforge_budget.logical_model_calls == 50 else 1200000
+        )
 
     @staticmethod
     def _safe_root(requested: Path) -> Path:
@@ -613,7 +621,13 @@ class Verified10Campaign:
         output = self.root / "mini-output" / task.instance_id
         output.mkdir(parents=True, exist_ok=True)
         config = self.root / "configs" / "mini" / f"{task.instance_id}.yaml"
-        self._atomic(config, self._mini_config().encode())
+        self._atomic(
+            config,
+            self._mini_config(
+                step_limit=self.protocol.mini_budget.step_limit,
+                wall_time_seconds=self.protocol.mini_budget.wall_time_seconds,
+            ).encode(),
+        )
         builtin = mini_root / "src" / "minisweagent" / "config" / "benchmarks" / "swebench.yaml"
         environment = dict(os.environ)
         environment["OPENAI_API_KEY"] = secret
