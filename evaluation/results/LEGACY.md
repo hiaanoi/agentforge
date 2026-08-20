@@ -19,6 +19,7 @@ must not be copied forward into a schema-v2 evidence bundle.
 - `m8.4.1-task-diagnostic`
 - `m8.4.2-task-contract-guidance`
 - `milestone_07b2_4`
+- `verified10-20260818`
 
 Where present, boolean `pass_at_1` meant the first slot's outcome. It is not
 the standard pass@1 estimator used by schema-v2 reports.
