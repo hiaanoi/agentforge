@@ -1,5 +1,7 @@
 from agentforge.context.models import LoopObservation, LoopPolicy, LoopState
 
+_READ_ONLY_TOOLS = frozenset({"get_git_diff", "list_files", "read_file", "search_text"})
+
 
 class LoopDetector:
     def __init__(self, policy: LoopPolicy | None = None) -> None:
@@ -12,6 +14,8 @@ class LoopDetector:
         action_digest: str,
         result_digest: str,
         error_code: str | None,
+        tool_name: str,
+        success: bool,
     ) -> LoopObservation:
         same_pair = bool(
             state.recent_action_digests
@@ -30,8 +34,14 @@ class LoopDetector:
             pair_count >= self._policy.warning_threshold
             or error_count >= self._policy.warning_threshold
         )
+        successful_read = success and error_code is None and tool_name in _READ_ONLY_TOOLS
+        pair_terminal_threshold = (
+            self._policy.successful_read_terminal_threshold
+            if successful_read
+            else self._policy.terminal_threshold
+        )
         terminal = (
-            pair_count >= self._policy.terminal_threshold
+            pair_count >= pair_terminal_threshold
             or error_count >= self._policy.terminal_threshold
         )
         next_state = LoopState(

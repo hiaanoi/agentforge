@@ -1329,6 +1329,8 @@ class AgentRuntime:
                     error_code=(
                         outcome.error_type.value if outcome.error_type is not None else None
                     ),
+                    tool_name=output.tool,
+                    success=outcome.success,
                 )
                 current_loop_state = observation.state
                 if observation.warning:
