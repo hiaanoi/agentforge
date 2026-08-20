@@ -3,6 +3,7 @@ from uuid import uuid4
 
 import pytest
 
+from agentforge.context.models import LoopObservation, LoopState
 from agentforge.domain.enums import EventType, RunStatus
 from agentforge.domain.repair import (
     BudgetProfile,
@@ -281,4 +282,51 @@ async def test_sensitive_tool_failure_remains_fail_closed(tmp_path: Path) -> Non
     assert state.failure_reason is RepairTerminationReason.MODEL_TOOL_FAILED
     assert state.policy_violations == 0
     assert len(provider.requests) == 1
+    database.close()
+
+
+@pytest.mark.asyncio
+async def test_repeated_successful_tool_loop_terminalizes_repair_state(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "module.py").write_text("value = 1\n", encoding="utf-8")
+    database = Database.from_path(tmp_path / "runtime.db")
+    database.create_schema()
+    runs = RunRepository(database)
+    events = EventRepository(database)
+    workflow = RepairWorkflow(database)
+    resolver = WorkspacePathResolver(workspace)
+    provider = MockModelProvider(
+        [
+            {"type": "tool_call", "tool": "read_file", "arguments": {"path": "module.py"}},
+        ]
+    )
+
+    class TerminalLoopDetector:
+        def observe(self, state: LoopState, **_: object) -> LoopObservation:
+            return LoopObservation(state=state, warning=False, terminal=True)
+
+    runtime = AgentRuntime(
+        runs,
+        events,
+        CheckpointRepository(database),
+        provider,
+        ToolExecutor(
+            ToolRegistry([ReadFileTool(resolver, SensitiveFilePolicy())]),
+            PolicyEngine(resolver, SensitiveFilePolicy()),
+            events,
+            runs,
+        ),
+        repair_coordinator=RepairCoordinator(workflow),
+        loop_detector=TerminalLoopDetector(),  # type: ignore[arg-type]
+    )
+    run = runtime.create_run("read the same file repeatedly")
+    workflow._evaluator_only_start(run.run_id, repair_policy(), uuid4(), "a" * 64)
+
+    failed = await runtime.execute(run.run_id)
+
+    state = workflow.get_state(run.run_id)
+    assert failed.status is RunStatus.FAILED
+    assert state.status is RepairCompletionStatus.RUNTIME_FAILURE
+    assert state.failure_reason is RepairTerminationReason.RUNTIME_FAILURE
     database.close()
