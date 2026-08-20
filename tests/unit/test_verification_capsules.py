@@ -1,4 +1,5 @@
 import os
+import stat
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -101,20 +102,89 @@ def test_store_rejects_linked_ancestor(tmp_path: Path) -> None:
         )
 
 
-def test_capture_rejects_links_and_partial_staging_is_never_executable(
+def test_capture_preserves_safe_relative_symlink_and_detects_target_tampering(
     tmp_path: Path,
 ) -> None:
     source, verifier, store = _roots(tmp_path)
-    link = source / "linked.py"
+    source_link = source / "pkg" / "linked.py"
+    non_nfc_source_link = source / "pkg" / "cafe\u0301-link.py"
+    verifier_link = verifier / "linked_test.py"
     try:
-        link.symlink_to(source / "pkg" / "module.py")
+        source_link.symlink_to("module.py")
+        non_nfc_source_link.symlink_to("module.py")
+        verifier_link.symlink_to("test_hidden.py")
     except OSError as exc:
         pytest.skip(f"Symlinks are unavailable on this platform: {exc}")
 
     builder = VerificationCapsuleBuilder(store)
+    capsule = builder.capture(
+        execution_id=uuid4(), source_root=source, verifier_root=verifier
+    )
+
+    copied_source_link = capsule.source_root / "pkg" / "linked.py"
+    copied_normalized_source_link = capsule.source_root / "pkg" / "caf\u00e9-link.py"
+    copied_verifier_link = capsule.verifier_root / "linked_test.py"
+    assert os.path.islink(copied_source_link)
+    assert os.path.islink(copied_normalized_source_link)
+    assert os.path.islink(copied_verifier_link)
+    assert os.readlink(copied_source_link) == "module.py"
+    assert os.readlink(copied_normalized_source_link) == "module.py"
+    assert os.readlink(copied_verifier_link) == "test_hidden.py"
+    builder.verify(capsule)
+
+    copied_source_link.unlink()
+    copied_source_link.symlink_to("different.py")
+    with pytest.raises(WorkspaceDigestError):
+        builder.verify(capsule)
+
+
+@pytest.mark.parametrize(
+    ("raw_name", "normalized_name"),
+    [
+        ("cafe\u0301.py", "caf\u00e9.py"),
+        ("plain.py", "plain.py"),
+    ],
+)
+def test_capsule_normalizes_entry_names_like_workspace_digester(
+    raw_name: str, normalized_name: str
+) -> None:
+    assert VerificationCapsuleBuilder._normalized_entry_name(raw_name) == normalized_name
+
+
+@pytest.mark.parametrize("name", ["", "bad/name.py", "bad\x00name.py"])
+def test_capsule_rejects_invalid_normalized_entry_names(name: str) -> None:
+    with pytest.raises(WorkspaceDigestError):
+        VerificationCapsuleBuilder._normalized_entry_name(name)
+
+
+def test_capture_preserves_workspace_digester_nfc_name_semantics(tmp_path: Path) -> None:
+    source, verifier, store = _roots(tmp_path)
+    (source / "pkg" / "cafe\u0301.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    capsule = VerificationCapsuleBuilder(store).capture(
+        execution_id=uuid4(), source_root=source, verifier_root=verifier
+    )
+
+    assert (
+        capsule.source_root / "pkg" / "caf\u00e9.py"
+    ).read_text(encoding="utf-8") == "VALUE = 2\n"
+    assert capsule.source_digest == WorkspaceDigester().digest(source)
+
+
+@pytest.mark.parametrize("target", ["/outside.py", "../outside.py"])
+def test_capture_rejects_absolute_or_escaping_symlink_targets(
+    tmp_path: Path, target: str
+) -> None:
+    source, verifier, store = _roots(tmp_path)
+    link = source / "linked.py"
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"Symlinks are unavailable on this platform: {exc}")
+
     execution_id = uuid4()
     with pytest.raises(WorkspaceDigestError):
-        builder.capture(
+        VerificationCapsuleBuilder(store).capture(
             execution_id=execution_id, source_root=source, verifier_root=verifier
         )
 
@@ -147,6 +217,92 @@ def test_capture_detects_source_mutation_during_single_pass_copy(
     assert changed
 
 
+def test_capture_discards_published_capsule_when_sealing_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, verifier, store = _roots(tmp_path)
+    capsule_id = uuid4()
+    builder = VerificationCapsuleBuilder(store)
+    original_seal = builder._seal_tree
+    seal_calls = 0
+
+    def fail_seal(root: Path) -> None:
+        nonlocal seal_calls
+        seal_calls += 1
+        if seal_calls == 2:
+            raise WorkspaceDigestError()
+        original_seal(root)
+
+    monkeypatch.setattr(builder, "_seal_tree", fail_seal)
+
+    with pytest.raises(WorkspaceDigestError):
+        builder.capture(
+            execution_id=uuid4(),
+            capsule_id=capsule_id,
+            source_root=source,
+            verifier_root=verifier,
+        )
+
+    assert not (store / str(capsule_id)).exists()
+    assert not any(path.name.startswith(".staging-") for path in store.iterdir())
+
+
+def test_cleanup_restores_regular_file_permission_before_unlinking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    staging = tmp_path / "sealed-staging"
+    staging.mkdir()
+    sealed_file = staging / "sealed.py"
+    sealed_file.write_text("value = 1\n", encoding="utf-8")
+    permission_restored = False
+    original_unlink = Path.unlink
+
+    def chmod(path: Path, mode: int, *, follow_symlinks: bool = True) -> None:
+        nonlocal permission_restored
+        if Path(path) == sealed_file and mode == 0o600:
+            permission_restored = True
+
+    def unlink(path: Path, *args: object, **kwargs: object) -> None:
+        if Path(path) == sealed_file and not permission_restored:
+            raise PermissionError("sealed regular file")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "chmod", chmod)
+    monkeypatch.setattr(os, "supports_follow_symlinks", set())
+    monkeypatch.setattr(Path, "unlink", unlink)
+
+    VerificationCapsuleBuilder._discard_staging(staging)
+
+    assert permission_restored
+    assert not staging.exists()
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        type("LinkStat", (), {"st_mode": stat.S_IFLNK, "st_file_attributes": 0})(),
+        type(
+            "ReparseStat",
+            (),
+            {
+                "st_mode": stat.S_IFREG,
+                "st_file_attributes": getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400),
+            },
+        )(),
+    ],
+)
+def test_cleanup_never_chmods_symlink_or_reparse_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, item: object
+) -> None:
+    def forbidden_chmod(*args: object, **kwargs: object) -> None:
+        pytest.fail("cleanup must not chmod a link or reparse entry")
+
+    monkeypatch.setattr(os, "chmod", forbidden_chmod)
+    VerificationCapsuleBuilder._restore_owned_deletion_mode(
+        tmp_path / "entry", item  # type: ignore[arg-type]
+    )
+
+
 def test_sealed_mutation_is_detected_and_concurrent_captures_never_share_staging(
     tmp_path: Path,
 ) -> None:
@@ -171,6 +327,31 @@ def test_sealed_mutation_is_detected_and_concurrent_captures_never_share_staging
     captured.write_bytes(b"tampered\n")
     with pytest.raises(WorkspaceDigestError):
         builder.verify(capsules[0])
+
+
+def test_seal_requests_no_follow_chmod_and_staging_cleanup_never_chmods(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "sealed"
+    root.mkdir()
+    (root / "child.py").write_text("value = 1\n", encoding="utf-8")
+    chmod_calls: list[tuple[Path, int, bool]] = []
+
+    def chmod_no_follow(path: Path, mode: int, *, follow_symlinks: bool) -> None:
+        chmod_calls.append((Path(path), mode, follow_symlinks))
+
+    monkeypatch.setattr(os, "chmod", chmod_no_follow)
+    monkeypatch.setattr(os, "supports_follow_symlinks", {chmod_no_follow})
+    VerificationCapsuleBuilder._seal_tree(root)
+
+    assert chmod_calls
+    assert all(not follow_symlinks for _, _, follow_symlinks in chmod_calls)
+
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "partial.py").write_text("partial\n", encoding="utf-8")
+    VerificationCapsuleBuilder._discard_staging(staging)
+    assert not staging.exists()
 
 
 def test_launch_profile_expands_only_capsule_mount_references(tmp_path: Path) -> None:
@@ -242,7 +423,7 @@ def test_capsule_launch_profile_runs_captured_verifier_against_captured_source(
             profile_id="hidden_smoke",
             name="Hidden smoke",
             description="Run captured verifier",
-            executable=sys.executable,
+            executable=str(Path(sys.executable).resolve(strict=True)),
             argv=("{VERIFIER}/hidden_test.py",),
             cwd=".",
             allowed_env={},

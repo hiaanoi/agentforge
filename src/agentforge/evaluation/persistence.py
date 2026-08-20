@@ -1,3 +1,4 @@
+from typing import Literal, cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -92,7 +93,7 @@ class EvaluationWorkspaceRepository:
                         relative_path=item.relative_path,
                         sha256=item.sha256,
                         size_bytes=item.size_bytes,
-                        file_kind=item.file_kind,
+                        file_kind=cast(Literal["REGULAR_FILE", "SYMLINK"], item.file_kind),
                         executable_bit=item.executable_bit,
                         is_symlink=item.is_symlink,
                         is_reparse_point=item.is_reparse_point,

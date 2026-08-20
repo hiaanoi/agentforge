@@ -1329,6 +1329,8 @@ class AgentRuntime:
                     error_code=(
                         outcome.error_type.value if outcome.error_type is not None else None
                     ),
+                    tool_name=output.tool,
+                    success=outcome.success,
                 )
                 current_loop_state = observation.state
                 if observation.warning:
@@ -1754,6 +1756,11 @@ class AgentRuntime:
         return self._fail(ownership, run, reason)
 
     def _fail(self, ownership: RunOwnership, run: Run, reason: str) -> Run:
+        if self._repairs is not None:
+            self._repairs.terminalize_runtime_failure(
+                run.run_id,
+                authority=self._authority(ownership, run.run_id),
+            )
         run.error_message = reason
         run.transition_to(RunStatus.FAILED)
         self._runs.save(run, authority=self._authority(ownership, run.run_id))

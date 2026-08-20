@@ -698,6 +698,23 @@ class RepairWorkflow:
             )
             return self._state_to_domain(row)
 
+    def terminalize_runtime_failure(
+        self,
+        run_id: UUID,
+        *,
+        authority: RunLeaseAuthority,
+    ) -> RepairState:
+        state = self.get_state(run_id)
+        if state.terminal:
+            return state
+        return self.transition_terminal(
+            run_id,
+            expected_version=state.state_version,
+            status=RepairCompletionStatus.RUNTIME_FAILURE,
+            reason=RepairTerminationReason.RUNTIME_FAILURE,
+            authority=authority,
+        )
+
     def _evaluator_only_transition_terminal(
         self,
         run_id: UUID,

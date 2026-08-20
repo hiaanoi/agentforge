@@ -6,9 +6,10 @@ import stat
 import tempfile
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal, Self
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentforge.domain.models import UtcDatetime, utc_now
 from agentforge.evaluation.task_definition import EvaluationTaskDefinition
@@ -26,11 +27,20 @@ class WorkspaceFileBaseline(BaseModel):
     relative_path: str = Field(min_length=1)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     size_bytes: int = Field(ge=0)
-    file_kind: str = "REGULAR_FILE"
+    file_kind: Literal["REGULAR_FILE", "SYMLINK"] = "REGULAR_FILE"
     executable_bit: bool
     is_symlink: bool = False
     is_reparse_point: bool = False
     content_kind: FileContentKind
+
+    @model_validator(mode="after")
+    def require_consistent_link_metadata(self) -> Self:
+        if (self.file_kind, self.is_symlink, self.is_reparse_point) not in {
+            ("REGULAR_FILE", False, False),
+            ("SYMLINK", True, False),
+        }:
+            raise ValueError("Workspace file kind and link metadata are inconsistent")
+        return self
 
 
 class WorkspaceBaseline(BaseModel):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -8,12 +9,15 @@ import sys
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from agentforge.evaluation.swebench_prediction import (
     SWEbenchInstanceBinding,
+    SWEbenchPrediction,
     SWEbenchPredictionError,
     SWEbenchPredictionExporter,
     save_swebench_prediction,
+    save_swebench_predictions,
 )
 
 
@@ -72,6 +76,36 @@ def test_capture_binds_standard_prediction_to_base_commit(tmp_path: Path) -> Non
     }
 
 
+def test_empty_prediction_preserves_failure_as_standard_record() -> None:
+    binding = _binding("a" * 40)
+
+    prediction = SWEbenchPrediction.empty(binding, "deepseek/account-model")
+
+    assert prediction.model_patch == ""
+    assert prediction.patch_sha256 == hashlib.sha256(b"").hexdigest()
+    assert prediction.base_commit == binding.base_commit
+    assert prediction.model_name_or_path == "agentforge:deepseek/account-model"
+
+
+def test_empty_prediction_namespace_is_explicit_and_rejects_double_prefix() -> None:
+    binding = _binding("a" * 40)
+    mini = SWEbenchPrediction.empty(binding, "deepseek-v4-flash", namespace="mini-swe-agent")
+    assert mini.model_name_or_path == "mini-swe-agent:deepseek-v4-flash"
+    with pytest.raises(SWEbenchPredictionError, match="prefix"):
+        SWEbenchPrediction.empty(binding, "agentforge:deepseek-v4-flash")
+
+
+def test_prediction_rejects_forged_legal_patch_sha256() -> None:
+    with pytest.raises(ValidationError, match="patch_sha256"):
+        SWEbenchPrediction(
+            instance_id="sympy__sympy-20590",
+            model_name_or_path="agentforge:deepseek/account-model",
+            model_patch="diff --git a/source.py b/source.py\n",
+            base_commit="a" * 40,
+            patch_sha256="a" * 64,
+        )
+
+
 def test_capture_rejects_wrong_head(tmp_path: Path) -> None:
     repository, base_commit = _repository(tmp_path)
     (repository / "source.py").write_text("answer = 2\n", encoding="utf-8")
@@ -95,17 +129,39 @@ def test_capture_rejects_empty_patch(tmp_path: Path) -> None:
         )
 
 
-def test_capture_rejects_untracked_files(tmp_path: Path) -> None:
+def test_capture_includes_untracked_files_without_mutating_real_index(tmp_path: Path) -> None:
     repository, base_commit = _repository(tmp_path)
     (repository / "source.py").write_text("answer = 2\n", encoding="utf-8")
     (repository / "created.py").write_text("created = True\n", encoding="utf-8")
 
-    with pytest.raises(SWEbenchPredictionError, match="untracked"):
-        SWEbenchPredictionExporter().capture(
-            repository,
-            binding=_binding(base_commit),
-            model_identity="deepseek/account-model",
-        )
+    before = _git(repository, "status", "--porcelain=v1")
+    prediction = SWEbenchPredictionExporter().capture(
+        repository,
+        binding=_binding(base_commit),
+        model_identity="deepseek/account-model",
+    )
+
+    assert "diff --git a/created.py b/created.py" in prediction.model_patch
+    assert "created = True" in prediction.model_patch
+    assert _git(repository, "status", "--porcelain=v1") == before
+
+
+def test_capture_can_exclude_runner_owned_untracked_directory(tmp_path: Path) -> None:
+    repository, base_commit = _repository(tmp_path)
+    (repository / "created.py").write_text("created = True\n", encoding="utf-8")
+    runtime = repository / ".agentforge"
+    runtime.mkdir()
+    (runtime / "runtime.toml").write_text("runner-owned\n", encoding="utf-8")
+
+    prediction = SWEbenchPredictionExporter().capture(
+        repository,
+        binding=_binding(base_commit),
+        model_identity="deepseek/account-model",
+        excluded_untracked_prefixes=(".agentforge",),
+    )
+
+    assert "created.py" in prediction.model_patch
+    assert ".agentforge" not in prediction.model_patch
 
 
 def test_capture_includes_staged_new_files(tmp_path: Path) -> None:
@@ -193,6 +249,50 @@ def test_save_writes_one_standard_jsonl_record_atomically(tmp_path: Path) -> Non
     assert len(lines) == 1
     assert json.loads(lines[0]) == prediction.harness_record()
     assert not output.with_name(f".{output.name}.tmp").exists()
+
+
+def test_save_predictions_orders_shuffled_input_and_rejects_wrong_denominator(
+    tmp_path: Path,
+) -> None:
+    predictions = [
+        SWEbenchPrediction.empty(
+            SWEbenchInstanceBinding(
+                instance_id=instance_id,
+                repo="sympy/sympy",
+                base_commit="a" * 40,
+            ),
+            "deepseek/account-model",
+        )
+        for instance_id in ("instance-b", "instance-a")
+    ]
+    output = tmp_path / "predictions.json"
+    save_swebench_predictions(
+        output, list(reversed(predictions)), expected_instance_ids=("instance-a", "instance-b")
+    )
+    assert [row["instance_id"] for row in json.loads(output.read_text())] == [
+        "instance-a",
+        "instance-b",
+    ]
+    with pytest.raises(SWEbenchPredictionError, match="duplicate"):
+        save_swebench_predictions(
+            output,
+            predictions,
+            expected_instance_ids=("instance-a", "instance-a"),
+        )
+
+
+def test_save_predictions_revalidates_model_copy_forgery(tmp_path: Path) -> None:
+    binding = SWEbenchInstanceBinding(
+        instance_id="instance-a", repo="sympy/sympy", base_commit="a" * 40
+    )
+    forged = SWEbenchPrediction.empty(binding, "deepseek/account-model").model_copy(
+        update={"model_patch": "forged"}
+    )
+
+    with pytest.raises(SWEbenchPredictionError):
+        save_swebench_predictions(
+            tmp_path / "predictions.json", [forged], expected_instance_ids=("instance-a",)
+        )
 
 
 def test_cli_exports_without_printing_patch(

@@ -222,6 +222,17 @@ class RepairCoordinator:
             return state
         raise RuntimeError("Repair state changed during tool failure handling")
 
+    def terminalize_runtime_failure(
+        self, run_id: object, *, authority: RunLeaseAuthority
+    ) -> RepairState:
+        from uuid import UUID
+
+        if not isinstance(run_id, UUID):
+            raise TypeError("run_id must be a UUID")
+        return self._workflow.terminalize_runtime_failure(
+            run_id, authority=authority
+        )
+
     def record_model_tool_failure(
         self,
         run_id: object,

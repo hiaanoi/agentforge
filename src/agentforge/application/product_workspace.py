@@ -11,6 +11,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal, cast
 from uuid import UUID, uuid5
 
 from sqlalchemy import select
@@ -50,9 +51,7 @@ class ProductWorkspaceCapture:
     def __init__(self, digester: WorkspaceDigester | None = None) -> None:
         self._digester = digester or WorkspaceDigester()
 
-    def capture(
-        self, root: Path, *, task_id: str, command_id: UUID
-    ) -> PreparedProductWorkspace:
+    def capture(self, root: Path, *, task_id: str, command_id: UUID) -> PreparedProductWorkspace:
         if type(task_id) is not str or not task_id:
             raise ValueError("task_id must be a non-empty string")
         if not isinstance(command_id, UUID):
@@ -66,8 +65,7 @@ class ProductWorkspaceCapture:
             entry
             for entry in inventory.entries
             if not any(
-                part in _EXCLUDED_DIRECTORY_NAMES
-                for part in entry.relative_path.split("/")[:-1]
+                part in _EXCLUDED_DIRECTORY_NAMES for part in entry.relative_path.split("/")[:-1]
             )
         )
         source = WorkspaceSnapshot(
@@ -106,8 +104,7 @@ class ProductWorkspaceCapture:
             entry
             for entry in inventory.entries
             if not any(
-                part in _EXCLUDED_DIRECTORY_NAMES
-                for part in entry.relative_path.split("/")[:-1]
+                part in _EXCLUDED_DIRECTORY_NAMES for part in entry.relative_path.split("/")[:-1]
             )
         )
         return self._digester._digest_entries(source_entries) == expected_digest
@@ -123,7 +120,10 @@ class ProductWorkspaceCapture:
                 relative_path=entry.relative_path,
                 sha256=entry.content_sha256,
                 size_bytes=entry.size_bytes,
+                file_kind=entry.entry_kind,
                 executable_bit=entry.executable_bit,
+                is_symlink=entry.entry_kind == "SYMLINK",
+                is_reparse_point=False,
                 content_kind=FileContentKind(entry.content_kind),
             )
             for entry in inventory.entries
@@ -141,9 +141,7 @@ class ProductWorkspaceCapture:
             "inventory_policy_version": PRODUCT_BASELINE_POLICY_VERSION,
             "files": [item.model_dump(mode="json") for item in files],
         }
-        canonical = json.dumps(
-            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        )
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -194,7 +192,7 @@ class WorkspaceBaselineStore:
                 relative_path=item.relative_path,
                 sha256=item.sha256,
                 size_bytes=item.size_bytes,
-                file_kind=item.file_kind,
+                file_kind=cast(Literal["REGULAR_FILE", "SYMLINK"], item.file_kind),
                 executable_bit=item.executable_bit,
                 is_symlink=item.is_symlink,
                 is_reparse_point=item.is_reparse_point,
@@ -208,9 +206,13 @@ class WorkspaceBaselineStore:
         )
         try:
             baseline = WorkspaceBaseline(
-                baseline_id=UUID(row.baseline_id), task_id=row.task_id,
-                workspace_root=row.workspace_root, root_digest=row.root_digest,
-                manifest_version=row.manifest_version, created_at=row.created_at, files=files,
+                baseline_id=UUID(row.baseline_id),
+                task_id=row.task_id,
+                workspace_root=row.workspace_root,
+                root_digest=row.root_digest,
+                manifest_version=row.manifest_version,
+                created_at=row.created_at,
+                files=files,
             )
             self._validate_manifest(baseline)
         except (TypeError, ValueError):

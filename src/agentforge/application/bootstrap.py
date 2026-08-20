@@ -75,6 +75,8 @@ class ProductProviderDefinition(BaseModel):
 
     kind: Literal["openai", "deepseek", "mock"]
     mock_responses: tuple[JsonValue, ...] = ()
+    timeout_seconds: float = Field(default=30.0, gt=0, le=600.0)
+    temperature: float | None = Field(default=None, ge=0.0, le=0.0)
 
 
 class ProductRuntimeDefinition(BaseModel):
@@ -256,6 +258,8 @@ def _build_provider(
         ModelProviderConfig(
             api_key=SecretStr(value),
             model=config.model,
+            timeout_seconds=definition.timeout_seconds,
+            temperature=definition.temperature,
             max_output_tokens=max_output_tokens,
         )
     )

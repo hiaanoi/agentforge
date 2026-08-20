@@ -37,6 +37,7 @@ from agentforge.persistence.repositories import (
     EventRepository,
     RunRepository,
 )
+from agentforge.persistence.source_revisions import WorkspaceDigester
 from agentforge.persistence.test_execution_workflow import TestExecutionWorkflow
 from agentforge.persistence.test_executions import (
     ProcessExecutionRepository,
@@ -263,11 +264,13 @@ class RuntimeComponentFactory:
         )
         runs = RunRepository(request.database)
         approvals = ApprovalRepository(request.database)
+        digester = WorkspaceDigester()
         mutation_coordinator = MutationCoordinator(
             MutationApprovalBindingRepository(request.database),
             MutationExecutionRepository(request.database),
             mutation_workflow,
             mutation_security,
+            digester=digester,
         )
         test_coordinator = TestExecutionCoordinator(
             TestApprovalBindingRepository(request.database),
@@ -275,6 +278,7 @@ class RuntimeComponentFactory:
             test_execution_workflow,
             request.profiles,
             supervisor_factory=request.supervisor_factory,
+            digester=digester,
         )
         executor = ToolExecutor(
             registry,

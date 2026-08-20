@@ -583,6 +583,45 @@ def test_git_tools_allow_ordinary_github_and_git_names(git_workspace: Path) -> N
     ).success
 
 
+def test_git_status_records_but_does_not_follow_internal_relative_symlink(
+    git_workspace: Path,
+) -> None:
+    target = git_workspace / "tracked.txt"
+    link = git_workspace / "tracked-link.txt"
+    try:
+        link.symlink_to("tracked.txt")
+    except OSError as exc:
+        pytest.skip(f"File symlinks are unavailable on this platform: {exc}")
+    _git(git_workspace, "add", "tracked-link.txt")
+    _git(git_workspace, "commit", "--quiet", "-m", "safe internal link")
+
+    result = GitStatusTool(WorkspacePathResolver(git_workspace)).execute(
+        GitStatusArguments()
+    )
+
+    assert result.success
+    assert target.read_text(encoding="utf-8") == "initial\n"
+
+
+def test_git_status_rejects_relative_symlink_escaping_workspace(
+    git_workspace: Path,
+) -> None:
+    external = git_workspace.parent / "external-link-target.txt"
+    external.write_text("external\n", encoding="utf-8")
+    link = git_workspace / "escaping-link.txt"
+    try:
+        link.symlink_to("../external-link-target.txt")
+    except OSError as exc:
+        pytest.skip(f"File symlinks are unavailable on this platform: {exc}")
+
+    with pytest.raises(ToolExecutionError) as raised:
+        GitStatusTool(WorkspacePathResolver(git_workspace)).execute(
+            GitStatusArguments()
+        )
+
+    assert raised.value.code is ToolErrorCode.UNSAFE_REPOSITORY_LAYOUT
+
+
 def test_git_timeout_includes_workspace_traversal(
     git_workspace: Path,
     monkeypatch: pytest.MonkeyPatch,

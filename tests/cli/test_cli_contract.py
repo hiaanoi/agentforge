@@ -16,16 +16,16 @@ def _write_runtime_definition(workspace: Path, verifier: Path) -> None:
     (state / "runtime.toml").write_text(
         "\n".join(
             (
-                '[provider]',
+                "[provider]",
                 'kind = "mock"',
                 (
                     'mock_responses = [{ type = "tool_call", tool = "run_tests", '
                     'arguments = { profile_id = "visible" } }]'
                 ),
-                '',
-                '[policy]',
+                "",
+                "[policy]",
                 'task_id = "cli-contract"',
-                'policy_version = 1',
+                "policy_version = 1",
                 'difficulty = "ENGINEERING"',
                 'budget_profile = "ENGINEERING"',
                 'allowed_write_paths = ["src/**"]',
@@ -33,38 +33,38 @@ def _write_runtime_definition(workspace: Path, verifier: Path) -> None:
                 'protected_paths = ["tests/**"]',
                 'allowed_development_test_profiles = ["visible"]',
                 'final_verification_profile_id = "verify"',
-                'allow_file_creation = true',
+                "allow_file_creation = true",
                 'allowed_create_paths = ["src/**"]',
-                'max_created_files = 2',
-                'max_changed_files = 4',
-                'max_total_changed_bytes = 1048576',
-                'max_single_file_changed_bytes = 1048576',
-                'path_case_sensitive = false',
-                '',
-                '[[profiles]]',
+                "max_created_files = 2",
+                "max_changed_files = 4",
+                "max_total_changed_bytes = 1048576",
+                "max_single_file_changed_bytes = 1048576",
+                "path_case_sensitive = false",
+                "",
+                "[[profiles]]",
                 'profile_id = "visible"',
                 'name = "Visible tests"',
                 'description = "Product development tests"',
-                f'executable = {str(Path(sys.executable))!r}',
+                f"executable = {str(Path(sys.executable))!r}",
                 'argv = ["-m", "pytest", "{SOURCE}", "-q"]',
                 'cwd = "."',
-                'timeout_seconds = 10',
-                'max_output_bytes = 4096',
-                'profile_version = 1',
+                "timeout_seconds = 10",
+                "max_output_bytes = 4096",
+                "profile_version = 1",
                 'purpose = "development"',
-                '',
-                '[[profiles]]',
+                "",
+                "[[profiles]]",
                 'profile_id = "verify"',
                 'name = "Hidden tests"',
                 'description = "Product final verification"',
-                f'executable = {str(Path(sys.executable))!r}',
+                f"executable = {str(Path(sys.executable))!r}",
                 'argv = ["-m", "pytest", "{VERIFIER}", "-q"]',
                 'cwd = "."',
-                'timeout_seconds = 10',
-                'max_output_bytes = 4096',
-                'profile_version = 1',
+                "timeout_seconds = 10",
+                "max_output_bytes = 4096",
+                "profile_version = 1",
                 'purpose = "verification"',
-                f'verifier_root = {str(verifier)!r}',
+                f"verifier_root = {str(verifier)!r}",
             )
         ),
         encoding="utf-8",
@@ -124,10 +124,12 @@ def test_runtime_definition_accepts_closed_deepseek_provider(tmp_path: Path) -> 
     _write_runtime_definition(workspace, verifier)
     runtime_path = workspace / ".agentforge" / "runtime.toml"
     runtime_path.write_text(
-        runtime_path.read_text(encoding="utf-8").replace(
+        runtime_path.read_text(encoding="utf-8")
+        .replace(
             'kind = "mock"',
-            'kind = "deepseek"',
-        ).replace(
+            'kind = "deepseek"\ntimeout_seconds = 600.0\ntemperature = 0.0',
+        )
+        .replace(
             'mock_responses = [{ type = "tool_call", tool = "run_tests", '
             'arguments = { profile_id = "visible" } }]\n',
             "",
@@ -146,6 +148,8 @@ def test_runtime_definition_accepts_closed_deepseek_provider(tmp_path: Path) -> 
     definition = ProductRuntimeDefinitionLoader().load(workspace, config=config)
 
     assert definition.provider.kind == "deepseek"
+    assert definition.provider.timeout_seconds == 600.0
+    assert definition.provider.temperature == 0.0
 
 
 def test_deepseek_provider_uses_only_runtime_environment_secret(
@@ -180,7 +184,7 @@ def test_deepseek_provider_uses_only_runtime_environment_secret(
     monkeypatch.setattr(bootstrap, "DeepSeekModelProvider", build)
 
     provider = bootstrap._build_provider(
-        ProductProviderDefinition(kind="deepseek"),
+        ProductProviderDefinition(kind="deepseek", timeout_seconds=600.0, temperature=0.0),
         config,
         max_output_tokens=321,
     )
@@ -189,6 +193,8 @@ def test_deepseek_provider_uses_only_runtime_environment_secret(
     assert len(captured) == 1
     assert captured[0].model == "deepseek-account-model"
     assert captured[0].max_output_tokens == 321
+    assert captured[0].timeout_seconds == 600.0
+    assert captured[0].temperature == 0.0
     assert "runtime-only-secret" not in captured[0].model_dump_json()
 
 
@@ -348,9 +354,7 @@ async def test_bootstrapped_application_requires_explicit_profile_trust(tmp_path
     )
 
     async with ProductApplicationFactory().build(workspace, config=config) as application:
-        view = application.query(
-            ProfileTrustDetails(workspace=workspace, profile_id="visible")
-        )
+        view = application.query(ProfileTrustDetails(workspace=workspace, profile_id="visible"))
         assert isinstance(view, ProfileTrustDetailsView)
         assert view.trusted is False
         events = [

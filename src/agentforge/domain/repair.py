@@ -15,6 +15,9 @@ class BudgetProfile(StrEnum):
     BASIC = "BASIC"
     ENGINEERING = "ENGINEERING"
     CHALLENGE = "CHALLENGE"
+    SWE_BENCH_PASS1 = "SWE_BENCH_PASS1"
+    SWE_BENCH_ABLATION_100 = "SWE_BENCH_ABLATION_100"
+    SWE_BENCH_PASS2 = "SWE_BENCH_PASS2"
 
 
 class RepairDifficulty(StrEnum):
@@ -94,6 +97,7 @@ class DiffViolationKind(StrEnum):
     FILE_DELETED = "FILE_DELETED"
     FILE_RENAMED = "FILE_RENAMED"
     SYMLINK_OR_REPARSE_CREATED = "SYMLINK_OR_REPARSE_CREATED"
+    SYMLINK_OR_REPARSE_CHANGED = "SYMLINK_OR_REPARSE_CHANGED"
     FILE_TYPE_CHANGED = "FILE_TYPE_CHANGED"
     CHANGESET_TOO_LARGE = "CHANGESET_TOO_LARGE"
     TOO_MANY_FILES_CHANGED = "TOO_MANY_FILES_CHANGED"
@@ -154,6 +158,33 @@ _FIXED_BUDGETS: dict[BudgetProfile, RepairBudgetLimits] = {
         max_completion_corrections=1,
         max_policy_violations=2,
         max_wall_time_seconds=900,
+    ),
+    BudgetProfile.SWE_BENCH_PASS1: RepairBudgetLimits(
+        max_model_calls=50,
+        max_read_calls=80,
+        max_edit_attempts=8,
+        max_test_runs=8,
+        max_completion_corrections=2,
+        max_policy_violations=3,
+        max_wall_time_seconds=1800,
+    ),
+    BudgetProfile.SWE_BENCH_ABLATION_100: RepairBudgetLimits(
+        max_model_calls=100,
+        max_read_calls=160,
+        max_edit_attempts=16,
+        max_test_runs=16,
+        max_completion_corrections=4,
+        max_policy_violations=6,
+        max_wall_time_seconds=3600,
+    ),
+    BudgetProfile.SWE_BENCH_PASS2: RepairBudgetLimits(
+        max_model_calls=100,
+        max_read_calls=160,
+        max_edit_attempts=16,
+        max_test_runs=16,
+        max_completion_corrections=4,
+        max_policy_violations=6,
+        max_wall_time_seconds=3600,
     ),
 }
 
@@ -320,9 +351,7 @@ class RepairState(BaseModel):
     final_verification_success: bool | None = None
     final_verification_completed_at: UtcDatetime | None = None
     last_diff_validation_id: str | None = None
-    final_workspace_digest: str | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
+    final_workspace_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     final_diff_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     latest_source_verified: bool = False
     pending_final_verification: bool = False

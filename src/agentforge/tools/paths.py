@@ -26,15 +26,13 @@ class WorkspacePathResolver:
 
     def resolve(self, requested: str, kind: PathKind = PathKind.ANY) -> Path:
         normalized = self._normalize_request(requested)
-        unresolved = (self._workspace / normalized).resolve(strict=False)
-        self._require_contained(unresolved)
-        try:
-            candidate = (self._workspace / normalized).resolve(strict=True)
-        except (OSError, RuntimeError) as exc:
+        candidate = Path(os.path.abspath(self._workspace / normalized))
+        self._require_contained(candidate)
+        self._reject_link_or_reparse_components(candidate)
+        if not candidate.exists():
             raise WorkspacePathError(
                 ToolErrorCode.PATH_NOT_FOUND, "Requested workspace path does not exist"
-            ) from exc
-        self._require_contained(candidate)
+            )
         if kind is PathKind.FILE and not candidate.is_file():
             raise WorkspacePathError(
                 ToolErrorCode.PATH_TYPE_MISMATCH, "Requested path must be a file"
@@ -44,6 +42,16 @@ class WorkspacePathResolver:
                 ToolErrorCode.PATH_TYPE_MISMATCH, "Requested path must be a directory"
             )
         return candidate
+
+    def _reject_link_or_reparse_components(self, candidate: Path) -> None:
+        current = self._workspace
+        for part in candidate.relative_to(self._workspace).parts:
+            current = current / part
+            if current.is_symlink() or self._is_reparse_point(current):
+                raise WorkspacePathError(
+                    ToolErrorCode.PATH_OUTSIDE_WORKSPACE,
+                    "Workspace paths cannot contain symlinks or reparse points",
+                )
 
     def relative(self, resolved: Path) -> str:
         self._require_contained(resolved)

@@ -77,12 +77,17 @@ class VerificationCapsuleBuilder:
         store_root: Path,
         *,
         limits: WorkspaceDigestLimits | None = None,
+        digester: WorkspaceDigester | None = None,
     ) -> None:
         if not store_root.is_absolute():
             raise WorkspaceDigestError()
+        if digester is not None and limits is not None and limits != digester._limits:
+            raise ValueError("capsule limits must match the injected workspace digester")
         self._store_root = store_root
-        self._limits = limits or WorkspaceDigestLimits()
-        self._digester = WorkspaceDigester(limits=self._limits)
+        self._limits = limits or (
+            digester._limits if digester is not None else WorkspaceDigestLimits()
+        )
+        self._digester = digester or WorkspaceDigester(limits=self._limits)
 
     def capture(
         self,
@@ -100,6 +105,7 @@ class VerificationCapsuleBuilder:
         capsule_id = capsule_id or uuid4()
         staging = store / f".staging-{capsule_id}"
         published = store / str(capsule_id)
+        published_owned = False
         try:
             os.mkdir(staging, 0o700)
             source_target = staging / "source"
@@ -123,6 +129,7 @@ class VerificationCapsuleBuilder:
             if published.exists():
                 raise WorkspaceDigestError()
             os.rename(staging, published)
+            published_owned = True
             self._fsync_directory(store)
             self._revalidate_store(store, store_chain)
             capsule = VerificationCapsule(
@@ -142,9 +149,13 @@ class VerificationCapsuleBuilder:
             return capsule
         except WorkspaceDigestError:
             self._discard_staging(staging)
+            if published_owned:
+                self._discard_owned_tree(published)
             raise
         except (OSError, RuntimeError, UnicodeError, ValueError):
             self._discard_staging(staging)
+            if published_owned:
+                self._discard_owned_tree(published)
             raise WorkspaceDigestError() from None
 
     def verify(self, capsule: VerificationCapsule) -> None:
@@ -306,20 +317,41 @@ class VerificationCapsuleBuilder:
                 if total_entries > self._limits.max_entries:
                     raise WorkspaceDigestError()
                 child_stat = child.stat(follow_symlinks=False)
-                self._reject_link_reparse_or_special(
-                    child_stat, allow_directory=True
-                )
-                name = unicodedata.normalize("NFC", child.name)
-                if not name or name != child.name or "/" in name or "\x00" in name:
-                    raise WorkspaceDigestError()
+                name = self._normalized_entry_name(child.name)
                 child_parts = (*parts, name)
                 relative = "/".join(child_parts)
-                collision = relative.casefold()
+                collision = unicodedata.normalize("NFC", relative).casefold()
                 if collision in collision_keys:
                     raise WorkspaceDigestError()
                 collision_keys.add(collision)
                 source_path = Path(child.path)
                 target_path = target_dir / name
+                if stat.S_ISLNK(child_stat.st_mode):
+                    target_bytes = self._copy_symlink(
+                        source_path,
+                        target_path,
+                        child_stat,
+                        root=source,
+                    )
+                    if len(entries) >= self._limits.max_files:
+                        raise WorkspaceDigestError()
+                    if len(target_bytes) > self._limits.max_file_bytes:
+                        raise WorkspaceDigestError()
+                    total_bytes += len(target_bytes)
+                    if total_bytes > self._limits.max_total_bytes:
+                        raise WorkspaceDigestError()
+                    entries.append(
+                        WorkspaceDigestEntry(
+                            relative_path=relative,
+                            size_bytes=len(target_bytes),
+                            content_sha256=self._digester.content_digest(
+                                b"agentforge-symlink-target-v1\0" + target_bytes
+                            ),
+                            entry_kind="SYMLINK",
+                        )
+                    )
+                    continue
+                self._reject_link_reparse_or_special(child_stat, allow_directory=True)
                 if stat.S_ISDIR(child_stat.st_mode):
                     if name in _EXCLUDED_DIRECTORY_NAMES:
                         continue
@@ -341,6 +373,40 @@ class VerificationCapsuleBuilder:
         visit(source, target, ())
         ordered = tuple(sorted(entries, key=self._digester._entry_sort_key))
         return self._digester._digest_entries(ordered)
+
+    def _copy_symlink(
+        self,
+        source: Path,
+        target: Path,
+        scanned: os.stat_result,
+        *,
+        root: Path,
+    ) -> bytes:
+        """Copy only an already-approved link payload, never its referent bytes."""
+
+        source_before = os.lstat(source)
+        WorkspaceDigester._require_same_symlink_object(scanned, source_before)
+        target_bytes = self._digester._read_safe_posix_symlink_target(
+            source, source_before, root_path=root
+        )
+        source_after = os.lstat(source)
+        WorkspaceDigester._require_same_symlink_object(source_before, source_after)
+        target_text = os.fsdecode(target_bytes)
+        try:
+            os.lstat(target)
+        except FileNotFoundError:
+            pass
+        else:
+            raise WorkspaceDigestError()
+        os.symlink(target_text, target)
+        target_before = os.lstat(target)
+        if not stat.S_ISLNK(target_before.st_mode) or os.readlink(target) != target_text:
+            raise WorkspaceDigestError()
+        target_after = os.lstat(target)
+        WorkspaceDigester._require_same_symlink_object(target_before, target_after)
+        source_final = os.lstat(source)
+        WorkspaceDigester._require_same_symlink_object(source_after, source_final)
+        return target_bytes
 
     def _copy_regular(
         self, source: Path, target: Path, scanned: os.stat_result
@@ -383,7 +449,14 @@ class VerificationCapsuleBuilder:
             target_stat = os.fstat(target_fd)
             if target_stat.st_nlink != 1 or target_stat.st_size != total:
                 raise WorkspaceDigestError()
-            return total, digest.hexdigest()
+            copied_digest = digest.hexdigest()
+            # Same-size rewrites can evade metadata-only checks on filesystems with
+            # coarse timestamp behavior. Bind the copied bytes to a second hardened
+            # read of the current source before publishing the capsule.
+            current = self._digester._read_regular_file(source, path_after)
+            if self._digester.content_digest(current) != copied_digest:
+                raise WorkspaceDigestError()
+            return total, copied_digest
         finally:
             if target_fd is not None:
                 os.close(target_fd)
@@ -437,6 +510,13 @@ class VerificationCapsuleBuilder:
             return os.path.commonpath((left_key, right_key)) in {left_key, right_key}
         except ValueError:
             return False
+
+    @staticmethod
+    def _normalized_entry_name(value: str) -> str:
+        name = unicodedata.normalize("NFC", value)
+        if not name or "/" in name or "\x00" in name:
+            raise WorkspaceDigestError()
+        return name
 
     @staticmethod
     def _reject_link_reparse_or_special(
@@ -493,20 +573,107 @@ class VerificationCapsuleBuilder:
     @staticmethod
     def _seal_tree(root: Path) -> None:
         for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
-            path.chmod(0o500 if path.is_dir() else 0o400)
-        root.chmod(0o500)
+            item = os.lstat(path)
+            if stat.S_ISLNK(item.st_mode):
+                continue
+            VerificationCapsuleBuilder._chmod_no_follow(
+                path, 0o500 if stat.S_ISDIR(item.st_mode) else 0o400
+            )
+        root_item = os.lstat(root)
+        if stat.S_ISLNK(root_item.st_mode):
+            raise WorkspaceDigestError()
+        VerificationCapsuleBuilder._chmod_no_follow(root, 0o500)
+
+    @staticmethod
+    def _chmod_no_follow(path: Path, mode: int) -> None:
+        # Windows' Python cannot request no-follow chmod.  Sealing is integrity
+        # evidence rather than an ACL claim, so decline the chmod instead of
+        # falling back to an operation that could traverse a reparse point.
+        if os.chmod not in os.supports_follow_symlinks:
+            return
+        os.chmod(path, mode, follow_symlinks=False)
 
     @staticmethod
     def _discard_staging(staging: Path) -> None:
-        if not staging.exists():
+        VerificationCapsuleBuilder._discard_owned_tree(staging)
+
+    @staticmethod
+    def _discard_owned_tree(root: Path) -> None:
+        try:
+            root_item = os.lstat(root)
+        except FileNotFoundError:
             return
-        for path in sorted(staging.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        if VerificationCapsuleBuilder._is_link_or_reparse(root_item):
             try:
-                path.chmod(0o700 if path.is_dir() else 0o600)
-                path.rmdir() if path.is_dir() else path.unlink()
+                root.unlink()
+            except OSError:
+                pass
+            return
+        if not stat.S_ISDIR(root_item.st_mode):
+            VerificationCapsuleBuilder._restore_owned_deletion_mode(root, root_item)
+            try:
+                root.unlink()
+            except OSError:
+                pass
+            return
+        try:
+            paths = sorted(root.rglob("*"), key=lambda item: len(item.parts))
+        except OSError:
+            paths = []
+        directories = [root]
+        for path in paths:
+            try:
+                item = os.lstat(path)
+            except OSError:
+                continue
+            if (
+                stat.S_ISDIR(item.st_mode)
+                and not VerificationCapsuleBuilder._is_link_or_reparse(item)
+            ):
+                directories.append(path)
+        for directory in directories:
+            try:
+                item = os.lstat(directory)
+                VerificationCapsuleBuilder._restore_owned_deletion_mode(directory, item)
+            except OSError:
+                continue
+        for path in reversed(paths):
+            try:
+                item = os.lstat(path)
+                if VerificationCapsuleBuilder._is_link_or_reparse(item):
+                    path.unlink()
+                elif stat.S_ISDIR(item.st_mode):
+                    path.rmdir()
+                else:
+                    VerificationCapsuleBuilder._restore_owned_deletion_mode(path, item)
+                    path.unlink()
             except OSError:
                 continue
         try:
-            staging.rmdir()
+            root.rmdir()
         except OSError:
             pass
+
+    @staticmethod
+    def _restore_owned_deletion_mode(path: Path, item: os.stat_result) -> None:
+        if VerificationCapsuleBuilder._is_link_or_reparse(item):
+            return
+        if stat.S_ISDIR(item.st_mode):
+            mode = 0o700
+        elif stat.S_ISREG(item.st_mode):
+            mode = 0o600
+        else:
+            return
+        if os.chmod in os.supports_follow_symlinks:
+            os.chmod(path, mode, follow_symlinks=False)
+        else:
+            # This is an owned output path whose lstat just established that it
+            # is an ordinary file or directory, never a link or reparse point.
+            os.chmod(path, mode)
+
+    @staticmethod
+    def _is_link_or_reparse(item: os.stat_result) -> bool:
+        reparse = (getattr(item, "st_file_attributes", 0) or 0) & getattr(
+            stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400
+        )
+        return stat.S_ISLNK(item.st_mode) or bool(reparse)

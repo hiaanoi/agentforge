@@ -7,8 +7,10 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Literal
+from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 _GIT_TIMEOUT_SECONDS = 30.0
 _MAX_GIT_OUTPUT_BYTES = 1024 * 1024
@@ -34,6 +36,31 @@ class SWEbenchPrediction(BaseModel):
     model_patch: str
     base_commit: str
     patch_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_patch_digest(self) -> SWEbenchPrediction:
+        actual = hashlib.sha256(self.model_patch.encode("utf-8")).hexdigest()
+        if self.patch_sha256 != actual:
+            raise ValueError("patch_sha256 does not match model_patch bytes")
+        return self
+
+    @classmethod
+    def empty(
+        cls,
+        binding: SWEbenchInstanceBinding,
+        model_identity: str,
+        *,
+        namespace: Literal["agentforge", "mini-swe-agent"] = "agentforge",
+    ) -> SWEbenchPrediction:
+        """Construct the standard harness record for a failed/empty attempt."""
+
+        return cls(
+            instance_id=binding.instance_id,
+            model_name_or_path=_normalized_model_identity(model_identity, namespace=namespace),
+            model_patch="",
+            base_commit=binding.base_commit,
+            patch_sha256=hashlib.sha256(b"").hexdigest(),
+        )
 
     def harness_record(self) -> dict[str, str]:
         return {
@@ -64,38 +91,17 @@ class SWEbenchPredictionExporter:
         *,
         binding: SWEbenchInstanceBinding,
         model_identity: str,
+        excluded_untracked_prefixes: tuple[str, ...] = (),
     ) -> SWEbenchPrediction:
         root = self._workspace_root(workspace)
-        if not model_identity or any(character.isspace() for character in model_identity):
-            raise SWEbenchPredictionError("Model identity must be non-empty and whitespace-free")
+        normalized_identity = _normalized_model_identity(model_identity, namespace="agentforge")
 
-        head = self._run_git(root, "rev-parse", "--verify", "HEAD").decode(
-            "ascii"
-        ).strip()
+        head = self._run_git(root, "rev-parse", "--verify", "HEAD").decode("ascii").strip()
         if head != binding.base_commit:
             raise SWEbenchPredictionError("Workspace HEAD does not match the bound base commit")
 
-        status = self._run_git(
-            root,
-            "status",
-            "--porcelain=v1",
-            "--untracked-files=normal",
-            "--ignored=no",
-        )
-        if any(line.startswith(b"?? ") for line in status.splitlines()):
-            raise SWEbenchPredictionError(
-                "Workspace contains untracked files that the patch would omit"
-            )
-
-        patch_bytes = self._run_git(
-            root,
-            "diff",
-            "--binary",
-            "--no-ext-diff",
-            "--src-prefix=a/",
-            "--dst-prefix=b/",
-            "HEAD",
-            "--",
+        patch_bytes = self._capture_patch(
+            root, excluded_untracked_prefixes=excluded_untracked_prefixes
         )
         if not patch_bytes:
             raise SWEbenchPredictionError("SWE-bench model patch is empty")
@@ -106,10 +112,71 @@ class SWEbenchPredictionExporter:
 
         return SWEbenchPrediction(
             instance_id=binding.instance_id,
-            model_name_or_path=f"agentforge:{model_identity}",
+            model_name_or_path=normalized_identity,
             model_patch=model_patch,
             base_commit=binding.base_commit,
             patch_sha256=hashlib.sha256(patch_bytes).hexdigest(),
+        )
+
+    def _capture_patch(self, root: Path, *, excluded_untracked_prefixes: tuple[str, ...]) -> bytes:
+        untracked_raw = self._run_git(root, "ls-files", "--others", "--exclude-standard", "-z")
+        if not untracked_raw:
+            return self._diff(root)
+        try:
+            all_untracked = tuple(
+                item.decode("utf-8") for item in untracked_raw.rstrip(b"\0").split(b"\0")
+            )
+        except UnicodeDecodeError as exc:
+            raise SWEbenchPredictionError("Untracked Git path is not valid UTF-8") from exc
+        prefixes = tuple(prefix.rstrip("/") for prefix in excluded_untracked_prefixes)
+        if any(
+            not prefix
+            or prefix.startswith("/")
+            or any(part in {"", ".", ".."} for part in prefix.split("/"))
+            for prefix in prefixes
+        ):
+            raise SWEbenchPredictionError("Excluded untracked prefix is unsafe")
+        untracked = tuple(
+            path
+            for path in all_untracked
+            if not any(path == prefix or path.startswith(prefix + "/") for prefix in prefixes)
+        )
+        if not untracked:
+            return self._diff(root)
+        index_raw = self._run_git(root, "rev-parse", "--git-path", "index")
+        try:
+            index_path = Path(index_raw.decode("utf-8").strip())
+        except UnicodeDecodeError as exc:
+            raise SWEbenchPredictionError("Git index path is not valid UTF-8") from exc
+        if not index_path.is_absolute():
+            index_path = root / index_path
+        temporary = index_path.with_name(f".{index_path.name}.agentforge-{uuid4().hex}.tmp")
+        environment = {**self._git_environment(), "GIT_INDEX_FILE": str(temporary)}
+        try:
+            shutil.copy2(index_path, temporary)
+            self._run_git_with_environment(
+                root, "add", "--intent-to-add", "--", *untracked, environment=environment
+            )
+            return self._diff(root, environment=environment)
+        except OSError as exc:
+            raise SWEbenchPredictionError("Temporary Git index could not be prepared") from exc
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def _diff(self, root: Path, *, environment: dict[str, str] | None = None) -> bytes:
+        return self._run_git_with_environment(
+            root,
+            "diff",
+            "--binary",
+            "--no-ext-diff",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            "HEAD",
+            "--",
+            environment=environment,
         )
 
     @staticmethod
@@ -128,11 +195,19 @@ class SWEbenchPredictionExporter:
         return resolved
 
     def _run_git(self, root: Path, *arguments: str) -> bytes:
+        return self._run_git_with_environment(root, *arguments)
+
+    def _run_git_with_environment(
+        self,
+        root: Path,
+        *arguments: str,
+        environment: dict[str, str] | None = None,
+    ) -> bytes:
         try:
             completed = subprocess.run(
                 [str(self._git_executable), *arguments],
                 cwd=root,
-                env=self._git_environment(),
+                env=environment or self._git_environment(),
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 timeout=_GIT_TIMEOUT_SECONDS,
@@ -160,18 +235,136 @@ class SWEbenchPredictionExporter:
 
 
 def save_swebench_prediction(path: Path, prediction: SWEbenchPrediction) -> None:
+    prediction = _revalidate_prediction(prediction)
     target = path.resolve(strict=False)
     target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name(f".{target.name}.tmp")
     payload = json.dumps(
         prediction.harness_record(),
         ensure_ascii=True,
         sort_keys=True,
         separators=(",", ":"),
     )
+    _atomic_write(target, (payload + "\n").encode("utf-8"))
+
+
+def save_swebench_predictions(
+    path: Path,
+    predictions: list[SWEbenchPrediction] | tuple[SWEbenchPrediction, ...],
+    *,
+    expected_instance_ids: tuple[str, ...] | list[str] | None = None,
+    protocol: object | None = None,
+) -> None:
+    """Atomically write the official SWE-bench standard JSON array.
+
+    The output intentionally contains only harness fields.  ``expected_instance_ids``
+    (or a protocol exposing ``tasks``) supplies the denominator and ordering.
+    """
+
+    target = path.resolve(strict=False)
+    payload = serialize_swebench_predictions(
+        predictions,
+        expected_instance_ids=expected_instance_ids,
+        protocol=protocol,
+    )
     try:
-        temporary.write_text(payload + "\n", encoding="utf-8", newline="\n")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write(target, payload)
+    except OSError as exc:
+        raise SWEbenchPredictionError("SWE-bench predictions could not be saved") from exc
+
+
+def serialize_swebench_predictions(
+    predictions: list[SWEbenchPrediction] | tuple[SWEbenchPrediction, ...],
+    *,
+    expected_instance_ids: tuple[str, ...] | list[str] | None = None,
+    protocol: object | None = None,
+) -> bytes:
+    """Serialize the official prediction array without touching the filesystem."""
+
+    try:
+        predictions = tuple(_revalidate_prediction(prediction) for prediction in predictions)
+    except (TypeError, ValueError):
+        raise SWEbenchPredictionError("SWE-bench prediction failed validation") from None
+    if expected_instance_ids is not None and protocol is not None:
+        raise SWEbenchPredictionError("Specify expected_instance_ids or protocol, not both")
+    if protocol is not None:
+        try:
+            expected_instance_ids = tuple(task.instance_id for task in protocol.tasks)  # type: ignore[attr-defined]
+        except (AttributeError, TypeError):
+            raise SWEbenchPredictionError("Protocol does not expose ordered tasks") from None
+    if expected_instance_ids is None:
+        raise SWEbenchPredictionError("Expected instance IDs or protocol are required")
+    expected = tuple(expected_instance_ids)
+    if len(set(expected)) != len(expected):
+        raise SWEbenchPredictionError("Expected instance IDs contain duplicates")
+    actual = [prediction.instance_id for prediction in predictions]
+    if len(set(actual)) != len(actual):
+        raise SWEbenchPredictionError("Predictions contain duplicate instance IDs")
+    if set(actual) != set(expected):
+        raise SWEbenchPredictionError("Predictions do not match expected instance IDs")
+    by_instance = {prediction.instance_id: prediction for prediction in predictions}
+    records = [by_instance[instance_id].harness_record() for instance_id in expected]
+    payload = json.dumps(records, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return (payload + "\n").encode("utf-8")
+
+
+def load_swebench_predictions(path: str | Path) -> tuple[dict[str, str], ...]:
+    """Read the official standard prediction array without exposing private metadata."""
+
+    try:
+        decoded = json.loads(Path(path).resolve(strict=True).read_bytes())
+        if not isinstance(decoded, list):
+            raise ValueError
+        records: list[dict[str, str]] = []
+        for item in decoded:
+            if not isinstance(item, dict) or set(item) != {
+                "instance_id",
+                "model_name_or_path",
+                "model_patch",
+            }:
+                raise ValueError
+            if not all(isinstance(value, str) for value in item.values()):
+                raise ValueError
+            records.append(dict(item))
+        return tuple(records)
+    except (OSError, UnicodeError, ValueError, TypeError):
+        raise SWEbenchPredictionError("SWE-bench predictions could not be loaded") from None
+
+
+read_swebench_predictions = load_swebench_predictions
+
+
+def _revalidate_prediction(prediction: SWEbenchPrediction) -> SWEbenchPrediction:
+    try:
+        return SWEbenchPrediction.model_validate(prediction.model_dump(mode="python"))
+    except (AttributeError, TypeError, ValueError, ValidationError):
+        raise SWEbenchPredictionError("SWE-bench prediction failed validation") from None
+
+
+def _normalized_model_identity(
+    model_identity: str, *, namespace: Literal["agentforge", "mini-swe-agent"]
+) -> str:
+    if not model_identity or any(character.isspace() for character in model_identity):
+        raise SWEbenchPredictionError("Model identity must be non-empty and whitespace-free")
+    if model_identity.startswith(("agentforge:", "mini-swe-agent:")):
+        raise SWEbenchPredictionError("Model identity must not include a namespace prefix")
+    return f"{namespace}:{model_identity}"
+
+
+def _atomic_write(target: Path, payload: bytes) -> None:
+    temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
+    try:
+        with temporary.open("wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temporary, target)
+        if os.name != "nt":
+            directory_fd = os.open(target.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     except OSError as exc:
         try:
             temporary.unlink(missing_ok=True)

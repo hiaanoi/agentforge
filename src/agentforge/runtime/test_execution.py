@@ -79,15 +79,17 @@ class TestExecutionCoordinator:
         *,
         supervisor_factory: Callable[[], ProcessTreeSupervisor] = (create_process_tree_supervisor),
         capsule_builder: VerificationCapsuleBuilder | None = None,
+        digester: WorkspaceDigester | None = None,
     ) -> None:
         self._bindings = bindings
         self._executions = executions
         self._workflow = workflow
         self._profiles = profiles
         self._profile_kernel = ProfileKernel(workflow.database, profiles)
-        self._digester = WorkspaceDigester()
+        self._digester = digester or WorkspaceDigester()
         self._capsules = capsule_builder or VerificationCapsuleBuilder(
-            workflow.database.verification_artifact_root
+            workflow.database.verification_artifact_root,
+            digester=self._digester,
         )
         self._managed = ManagedTestExecutionCore(
             supervisor_factory=supervisor_factory,

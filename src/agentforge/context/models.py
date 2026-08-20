@@ -65,6 +65,7 @@ class LoopPolicy(BaseModel):
 
     warning_threshold: int = Field(default=2, ge=2)
     terminal_threshold: int = Field(default=3, ge=3)
+    successful_read_terminal_threshold: int = Field(default=9, ge=3)
 
 
 class LoopObservation(BaseModel):

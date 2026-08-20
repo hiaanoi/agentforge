@@ -300,9 +300,8 @@ def build_runtime(
         profiles,
         supervisor_factory=lambda: supervisor,
         capsule_builder=capsule_builder,
+        digester=digester,
     )
-    if digester is not None:
-        test_coordinator._digester = digester
     executor = ToolExecutor(
         ToolRegistry([RunTestsTool(profiles)]),
         PolicyEngine(resolver, SensitiveFilePolicy()),
