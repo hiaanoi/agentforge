@@ -444,13 +444,37 @@ class Verified10Campaign:
 
         return self._update(replace)
 
-    def run_agentforge(self, *, recover_running: bool = False, retry_failed: bool = False) -> None:
+    _agentforge_budget_profile = "SWE_BENCH_PASS1"
+    _agentforge_max_steps = 80
+    _agentforge_max_model_requests = 52
+    _agentforge_max_total_tokens = 600000
+
+    def run_agentforge(
+        self,
+        *,
+        recover_running: bool = False,
+        retry_failed: bool = False,
+        task_ids: tuple[str, ...] | None = None,
+    ) -> None:
+        tasks = self._select_tasks(task_ids)
         self._run_arm(
             BenchmarkArm.AGENTFORGE,
             recover_running=recover_running,
             retry_failed=retry_failed,
             mini_root=None,
+            tasks=tasks,
         )
+
+    def _select_tasks(self, task_ids: tuple[str, ...] | None) -> tuple[Verified10Task, ...]:
+        if task_ids is None:
+            return self.protocol.tasks
+        if len(set(task_ids)) != len(task_ids):
+            raise CampaignExecutionError("Selected task IDs contain duplicates")
+        by_id = {task.instance_id: task for task in self.protocol.tasks}
+        try:
+            return tuple(by_id[task_id] for task_id in task_ids)
+        except KeyError:
+            raise CampaignExecutionError("Selected task ID is not in the protocol") from None
 
     def run_mini(
         self,
@@ -477,12 +501,13 @@ class Verified10Campaign:
         recover_running: bool,
         retry_failed: bool,
         mini_root: Path | None,
+        tasks: tuple[Verified10Task, ...] | None = None,
     ) -> None:
         if retry_failed:
             raise CampaignExecutionError("Protocol permits one attempt; --retry-failed is invalid")
         state = self._load()
         self._validate_prepared_bindings(state, arm)
-        for task in self.protocol.tasks:
+        for task in tasks or self.protocol.tasks:
             state = self._load()
             existing = self._records(state, arm).get(task.instance_id)
             if existing is not None and existing.status in {
@@ -782,7 +807,13 @@ class Verified10Campaign:
         self._atomic(directory / "config.toml", self._agentforge_config().encode())
         self._atomic(
             directory / "runtime.toml",
-            self._agentforge_runtime(task.instance_id, verifier).encode(),
+            self._agentforge_runtime(
+                task.instance_id,
+                verifier,
+                budget_profile=self._agentforge_budget_profile,
+                max_model_requests=self._agentforge_max_model_requests,
+                max_total_tokens=self._agentforge_max_total_tokens,
+            ).encode(),
         )
         try:
             loader = ProductConfigLoader(user_root=self.root / ".no-user-config")
@@ -791,7 +822,7 @@ class Verified10Campaign:
                 cli={
                     "database_path": ".agentforge/agentforge.db",
                     "model": "deepseek-v4-flash",
-                    "max_steps": 80,
+                    "max_steps": self._agentforge_max_steps,
                     "profile_ids": ("compile", "verify"),
                 },
             )
@@ -815,8 +846,7 @@ class Verified10Campaign:
                 "AgentForge generated configuration is incompatible"
             ) from None
 
-    @staticmethod
-    def _af_common(workspace: Path) -> tuple[str, ...]:
+    def _af_common(self, workspace: Path) -> tuple[str, ...]:
         return (
             "--workspace",
             str(workspace),
@@ -825,7 +855,7 @@ class Verified10Campaign:
             "--model",
             "deepseek-v4-flash",
             "--max-steps",
-            "80",
+            str(self._agentforge_max_steps),
             "--profile-id",
             "compile",
             "--profile-id",

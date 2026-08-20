@@ -160,7 +160,14 @@ def mini_config() -> str:
     )
 
 
-def agentforge_runtime(task_id: str, verifier_root: Path) -> str:
+def agentforge_runtime(
+    task_id: str,
+    verifier_root: Path,
+    *,
+    budget_profile: str = "SWE_BENCH_PASS1",
+    max_model_requests: int = 52,
+    max_total_tokens: int = 600000,
+) -> str:
     python = str(Path(sys.executable).resolve(strict=True)).replace("\\", "/")
     verifier = str(verifier_root.resolve(strict=True)).replace("\\", "/")
     return f'''[provider]
@@ -169,16 +176,16 @@ timeout_seconds = 600.0
 temperature = 0.0
 
 [model_budget]
-max_model_requests = 52
+max_model_requests = {max_model_requests}
 max_retries = 2
 max_output_tokens_per_request = 4096
-max_total_tokens = 600000
+max_total_tokens = {max_total_tokens}
 
 [policy]
 task_id = "{task_id}"
 policy_version = 1
 difficulty = "ENGINEERING"
-budget_profile = "SWE_BENCH_PASS1"
+budget_profile = "{budget_profile}"
 allowed_write_paths = ["**"]
 forbidden_write_paths = [".agentforge/**", ".git/**"]
 protected_paths = [".agentforge/**", ".git/**"]
