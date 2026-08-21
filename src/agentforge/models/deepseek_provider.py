@@ -93,7 +93,10 @@ class DeepSeekModelProvider:
         if request.tools:
             kwargs["tools"] = [convert_tool_spec(spec) for spec in request.tools]
         if self._config.max_output_tokens is not None:
-            kwargs["max_tokens"] = self._config.max_output_tokens
+            token_limit_key = (
+                "max_completion_tokens" if self.name == "openai" else "max_tokens"
+            )
+            kwargs[token_limit_key] = self._config.max_output_tokens
 
         started = perf_counter()
         try:
