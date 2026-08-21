@@ -341,13 +341,13 @@ class AgentRuntime:
         )
         run.current_step = result.model_calls
         self._runs.save(run, authority=self._authority(ownership, run.run_id))
-        if not result.submitted:
+        patch = self._candidate_publisher.capture(candidate.root)
+        if not result.submitted and not patch.entries:
             return self._fail(
                 ownership,
                 run,
                 f"Maximum step count of {run.max_steps} exhausted before candidate submission",
             )
-        patch = self._candidate_publisher.capture(candidate.root)
         self._candidate_store.save(str(run.run_id), patch)
         history = json.loads(json.dumps(result.history))
         context = self._context_builder.build(

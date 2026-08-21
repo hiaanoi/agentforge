@@ -59,6 +59,18 @@ class CandidateThenSubmitModel:
         return {"type": "final", "answer": "submit"}
 
 
+class CandidateWithoutSubmitModel:
+    name = "test-model"
+
+    @property
+    def journal_identity(self) -> str:
+        return "test-model/without-submit"
+
+    async def generate(self, request: ModelRequest) -> object:
+        del request
+        return {"type": "tool_call", "tool": "bash", "arguments": {"command": "edit"}}
+
+
 class WriteCandidateShell:
     def __init__(self, root: Path) -> None:
         self._root = root
@@ -139,6 +151,34 @@ async def test_mini_linear_submit_creates_an_unpublished_final_patch_approval(
     approval = runtime.list_pending_approvals(run.run_id)[0]
     assert approval.tool_name == "publish_candidate_patch"
     assert store.path_for(run.run_id).is_file()
+    database.close()
+
+
+@pytest.mark.asyncio
+async def test_mini_linear_auto_submits_nonempty_candidate_at_step_limit(
+    tmp_path: Path,
+) -> None:
+    canonical, _ = _git_workspaces(tmp_path)
+    security = MutationSecurityPolicy(
+        WorkspacePathResolver(canonical), SensitiveFilePolicy(), MutationLimits()
+    )
+    publisher = CandidatePatchPublisher(canonical_root=canonical, security=security)
+    store = CandidatePatchStore(canonical)
+    runtime, database = _runtime(
+        canonical,
+        CandidatePatchPublishTool(publisher, store),
+        model=CandidateWithoutSubmitModel(),
+        repair_engine=RepairEngineKind.MINI_LINEAR,
+        candidate_shell_factory=WriteCandidateShell,
+        candidate_publisher=publisher,
+        candidate_store=store,
+    )
+    run = runtime.create_run("repair candidate", max_steps=1)
+
+    waiting = await runtime.execute(run.run_id)
+
+    assert waiting.status is RunStatus.WAITING_APPROVAL
+    assert runtime.list_pending_approvals(run.run_id)[0].tool_name == "publish_candidate_patch"
     database.close()
 
 
