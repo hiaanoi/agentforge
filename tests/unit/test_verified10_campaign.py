@@ -842,3 +842,14 @@ def test_mini_config_ignores_unmapped_provider_pricing_without_changing_budget()
     assert "cost_tracking: ignore_errors" in config
     assert "step_limit: 50" in config
     assert "cost_limit: 0.0" in config
+
+
+def test_agentforge_runtime_can_select_mini_linear_engine(tmp_path: Path) -> None:
+    verifier = tmp_path / "verifier"
+    verifier.mkdir()
+
+    runtime = Verified10Campaign._agentforge_runtime(
+        EXPECTED_INSTANCE_IDS[0], verifier, repair_engine="mini_linear"
+    )
+
+    assert 'repair_engine = "mini_linear"' in runtime

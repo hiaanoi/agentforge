@@ -45,6 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
                 action="store_true",
                 help="rejected by this attempts=1 protocol; retained for explicit diagnostics",
             )
+        if name == "run-agentforge":
+            item.add_argument(
+                "--repair-engine",
+                choices=("native", "mini_linear"),
+                default=None,
+            )
         if name == "run-mini":
             item.add_argument(
                 "--mini-root", type=Path, default=os.environ.get("MINI_SWE_AGENT_ROOT")
@@ -85,9 +91,13 @@ def main(
             ):
                 print(f"{key}={summary[key]}")
         elif args.command == "run-agentforge":
-            campaign.run_agentforge(  # type: ignore[attr-defined]
-                recover_running=args.recover_running, retry_failed=args.retry_failed
-            )
+            kwargs = {
+                "recover_running": args.recover_running,
+                "retry_failed": args.retry_failed,
+            }
+            if args.repair_engine is not None:
+                kwargs["repair_engine"] = args.repair_engine
+            campaign.run_agentforge(**kwargs)  # type: ignore[attr-defined]
         elif args.command == "run-mini":
             if args.mini_root is None:
                 raise CampaignExecutionError("run-mini requires --mini-root or MINI_SWE_AGENT_ROOT")

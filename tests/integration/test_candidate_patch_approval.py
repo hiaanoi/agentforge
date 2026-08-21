@@ -152,10 +152,11 @@ async def test_mini_linear_final_patch_publishes_after_approval_and_resume(
     )
     publisher = CandidatePatchPublisher(canonical_root=canonical, security=security)
     store = CandidatePatchStore(canonical)
+    model = CandidateThenSubmitModel()
     runtime, database = _runtime(
         canonical,
         CandidatePatchPublishTool(publisher, store),
-        model=CandidateThenSubmitModel(),
+        model=model,
         repair_engine=RepairEngineKind.MINI_LINEAR,
         candidate_shell_factory=WriteCandidateShell,
         candidate_publisher=publisher,
@@ -169,6 +170,7 @@ async def test_mini_linear_final_patch_publishes_after_approval_and_resume(
     completed = await runtime.resume(run.run_id)
 
     assert completed.status is RunStatus.COMPLETED
+    assert model.calls == 2
     assert (canonical / "src" / "module.py").read_text(encoding="utf-8") == "value = 2\n"
     database.close()
 

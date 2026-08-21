@@ -789,6 +789,12 @@ class AgentRuntime:
             ):
                 raise ResumeNotAllowedError("Consumed decision could not continue")
             run = self._runs.get(run_id)
+            if (
+                self._repair_engine is RepairEngineKind.MINI_LINEAR
+                and snapshot.pending_tool_call is not None
+                and snapshot.pending_tool_call.tool == "publish_candidate_patch"
+            ):
+                return self._complete_mini_linear_publish(ownership, run)
             if self._repairs is not None:
                 repair_state = self._repairs.state(run_id)
                 if repair_state.terminal:
@@ -833,6 +839,20 @@ class AgentRuntime:
             return self._runs.get(run_id)
         finally:
             self._active_runs.discard(run_id)
+
+    def _complete_mini_linear_publish(
+        self, ownership: RunOwnership, run: Run
+    ) -> Run:
+        run.final_output = "Candidate patch published"
+        run.transition_to(RunStatus.COMPLETED)
+        self._runs.save(run, authority=self._authority(ownership, run.run_id))
+        self._append_event(
+            ownership,
+            run.run_id,
+            EventType.RUN_COMPLETED,
+            {"final_output": run.final_output},
+        )
+        return run
 
     async def _consume_decision(
         self,
