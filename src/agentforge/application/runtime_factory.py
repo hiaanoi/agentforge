@@ -48,6 +48,7 @@ from agentforge.policy.repair import RepairPolicyEnforcer
 from agentforge.policy.sensitive import SensitiveFilePolicy
 from agentforge.process.base import ProcessTreeSupervisor
 from agentforge.process.runner import create_process_tree_supervisor
+from agentforge.repair_engines.models import RepairEngineKind
 from agentforge.runtime.engine import AgentRuntime
 from agentforge.runtime.mutations import MutationCoordinator
 from agentforge.runtime.repair import RepairCoordinator
@@ -129,6 +130,7 @@ class RuntimeAssemblyRequest:
     events: EventRepository
     repair_workflow: RepairWorkflow
     max_output_chars: int
+    repair_engine: RepairEngineKind = RepairEngineKind.NATIVE
     repair_coordinator: RepairCoordinator | None = None
     supervisor_factory: Callable[[], ProcessTreeSupervisor] = (
         create_process_tree_supervisor
@@ -175,6 +177,7 @@ class RuntimeComponents(BaseModel):
     configured_profile_ids: tuple[str, ...]
     model_budget: ModelBudget
     repair_policy: RepairTaskPolicy
+    repair_engine: RepairEngineKind
     tool_names: tuple[str, ...]
     common_binding_digest: str = Field(pattern=_DIGEST_PATTERN)
 
@@ -334,6 +337,7 @@ class RuntimeComponentFactory:
             ),
             model_budget=request.model_budget,
             repair_policy=request.policy,
+            repair_engine=request.repair_engine,
             tool_names=tuple(tool.spec.name for tool in registry.list_tools()),
             common_binding_digest=binding_digest,
         )

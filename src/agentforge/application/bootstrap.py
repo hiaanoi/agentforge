@@ -16,7 +16,15 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    SecretStr,
+    ValidationError,
+    field_validator,
+)
 
 from agentforge.application.app import AgentApplication
 from agentforge.application.config import (
@@ -43,6 +51,7 @@ from agentforge.models.openai_provider import OpenAIModelProvider
 from agentforge.persistence.database import Database
 from agentforge.persistence.repair_workflow import RepairWorkflow
 from agentforge.persistence.repositories import EventRepository
+from agentforge.repair_engines.models import RepairEngineKind
 from agentforge.tools.paths import WorkspacePathResolver
 from agentforge.tools.testing.profiles import TestProfileDefinition, TestProfileRegistry
 
@@ -85,12 +94,22 @@ class ProductRuntimeDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     provider: ProductProviderDefinition
+    repair_engine: RepairEngineKind = RepairEngineKind.NATIVE
     policy: RepairTaskPolicy
     profiles: tuple[TestProfileDefinition, ...] = Field(min_length=1)
     model_budget: ModelBudget = Field(default_factory=ModelBudget)
     context_policy: ContextPolicy = Field(default_factory=_default_product_context_policy)
     max_output_chars: int = Field(default=20_000, gt=0, le=1_000_000)
     config_source_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("repair_engine", mode="before")
+    @classmethod
+    def parse_repair_engine(cls, value: object) -> RepairEngineKind:
+        if isinstance(value, RepairEngineKind):
+            return value
+        if type(value) is str:
+            return RepairEngineKind(value)
+        raise ValueError("invalid repair engine")
 
     @property
     def profile_ids(self) -> tuple[str, ...]:
@@ -188,6 +207,7 @@ class ProductApplicationFactory:
                     events=EventRepository(database),
                     repair_workflow=workflow,
                     max_output_chars=definition.max_output_chars,
+                    repair_engine=definition.repair_engine,
                 )
             )
             assembler = ProductStartRunAssembler(
