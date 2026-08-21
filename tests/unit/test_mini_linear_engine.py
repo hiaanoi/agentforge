@@ -91,6 +91,7 @@ async def test_mini_linear_engine_uses_swe_task_prompt_contract() -> None:
     assert "<pr_description>" in task
     assert "DO NOT MODIFY: Tests" in task
     assert "do not cd to /workspace or /testbed" in task
+    assert "At most three commands" in task
     assert model.requests[0].history == []
 
 

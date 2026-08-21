@@ -40,6 +40,8 @@ Consider the following PR description:
 You are a software engineer interacting continuously with a computer by submitting
 commands. Work in the candidate workspace and make a general, minimal source fix.
 The bash tool already starts in the candidate root; do not cd to /workspace or /testbed.
+At most three commands may only inspect the repository; then read the target source,
+edit it, and run a focused verification.
 
 For each response, include a short THOUGHT section and exactly one bash tool call.
 Run commands, inspect their results, and use the next response to continue the repair.
