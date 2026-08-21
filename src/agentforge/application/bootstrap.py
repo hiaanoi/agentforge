@@ -274,6 +274,7 @@ def _build_provider(
     value = os.environ.get(environment_name)
     if not value:
         raise UnsafeConfigurationError()
+    base_url = os.environ.get("OPENAI_BASE_URL") if definition.kind == "openai" else None
     return provider_type(
         ModelProviderConfig(
             api_key=SecretStr(value),
@@ -281,6 +282,7 @@ def _build_provider(
             timeout_seconds=definition.timeout_seconds,
             temperature=definition.temperature,
             max_output_tokens=max_output_tokens,
+            base_url=base_url,
         )
     )
 

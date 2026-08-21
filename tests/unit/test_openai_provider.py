@@ -90,6 +90,25 @@ def usage() -> object:
     )
 
 
+def test_provider_binds_relay_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def build_client(**kwargs: object) -> FakeClient:
+        captured.update(kwargs)
+        return FakeClient(SimpleNamespace(output=[], output_text="done"))
+
+    monkeypatch.setattr("agentforge.models.openai_provider.AsyncOpenAI", build_client)
+    OpenAIModelProvider(
+        ModelProviderConfig(
+            api_key="secret",
+            model="gpt-5.4-mini",
+            base_url="https://relay.example/v1",
+        )
+    )
+
+    assert captured["base_url"] == "https://relay.example/v1"
+
+
 @pytest.mark.asyncio
 async def test_provider_maps_single_function_call_and_request_options() -> None:
     response = SimpleNamespace(

@@ -168,6 +168,7 @@ def agentforge_runtime(
     max_model_requests: int = 52,
     max_total_tokens: int = 600000,
     repair_engine: str = "native",
+    provider_kind: str = "deepseek",
 ) -> str:
     python = str(Path(sys.executable).resolve(strict=True)).replace("\\", "/")
     verifier = str(verifier_root.resolve(strict=True)).replace("\\", "/")
@@ -175,7 +176,7 @@ def agentforge_runtime(
         "" if repair_engine == "native" else f'repair_engine = "{repair_engine}"\n\n'
     )
     return f'''{engine_binding}[provider]
-kind = "deepseek"
+kind = "{provider_kind}"
 timeout_seconds = 600.0
 temperature = 0.0
 

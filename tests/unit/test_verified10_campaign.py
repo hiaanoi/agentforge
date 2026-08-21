@@ -853,3 +853,16 @@ def test_agentforge_runtime_can_select_mini_linear_engine(tmp_path: Path) -> Non
     )
 
     assert 'repair_engine = "mini_linear"' in runtime
+
+
+def test_agentforge_runtime_can_bind_openai_relay_model(tmp_path: Path) -> None:
+    verifier = tmp_path / "verifier"
+    verifier.mkdir()
+
+    runtime = Verified10Campaign._agentforge_runtime(
+        EXPECTED_INSTANCE_IDS[0],
+        verifier,
+        provider_kind="openai",
+    )
+
+    assert 'kind = "openai"' in runtime

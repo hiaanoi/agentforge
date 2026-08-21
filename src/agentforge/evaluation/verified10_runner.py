@@ -90,6 +90,8 @@ class Verified10Campaign:
             600000 if self.protocol.agentforge_budget.logical_model_calls == 50 else 1200000
         )
         self._active_repair_engine: Literal["native", "mini_linear"] = "native"
+        self._active_provider_kind: Literal["deepseek", "openai"] = "deepseek"
+        self._active_model: str = self.protocol.model
 
     @staticmethod
     def _safe_root(requested: Path) -> Path:
@@ -465,8 +467,14 @@ class Verified10Campaign:
         retry_failed: bool = False,
         task_ids: tuple[str, ...] | None = None,
         repair_engine: Literal["native", "mini_linear"] = "native",
+        provider_kind: Literal["deepseek", "openai"] = "deepseek",
+        model: str | None = None,
     ) -> None:
         self._active_repair_engine = repair_engine
+        self._active_provider_kind = provider_kind
+        self._active_model = model or self.protocol.model
+        if not self._active_model:
+            raise CampaignExecutionError("AgentForge model must not be empty")
         tasks = self._select_tasks(task_ids)
         self._run_arm(
             BenchmarkArm.AGENTFORGE,
@@ -836,6 +844,7 @@ class Verified10Campaign:
                 max_model_requests=self._agentforge_max_model_requests,
                 max_total_tokens=self._agentforge_max_total_tokens,
                 repair_engine=self._active_repair_engine,
+                provider_kind=self._active_provider_kind,
             ).encode(),
         )
         try:
@@ -844,7 +853,7 @@ class Verified10Campaign:
                 workspace,
                 cli={
                     "database_path": ".agentforge/agentforge.db",
-                    "model": "deepseek-v4-flash",
+                    "model": self._active_model,
                     "max_steps": self._agentforge_max_steps,
                     "profile_ids": ("compile", "verify"),
                 },
@@ -876,7 +885,7 @@ class Verified10Campaign:
             "--database-path",
             ".agentforge/agentforge.db",
             "--model",
-            "deepseek-v4-flash",
+            self._active_model,
             "--max-steps",
             str(self._agentforge_max_steps),
             "--profile-id",
@@ -1192,7 +1201,7 @@ class Verified10Campaign:
             prediction = SWEbenchPredictionExporter().capture(
                 workspace,
                 binding=binding,
-                model_identity=self.protocol.model,
+                model_identity=self._active_model,
                 excluded_untracked_prefixes=(".agentforge",),
             )
             return prediction.model_patch

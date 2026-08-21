@@ -51,6 +51,12 @@ def build_parser() -> argparse.ArgumentParser:
                 choices=("native", "mini_linear"),
                 default=None,
             )
+            item.add_argument(
+                "--provider-kind",
+                choices=("deepseek", "openai"),
+                default=None,
+            )
+            item.add_argument("--model", default=None)
         if name == "run-mini":
             item.add_argument(
                 "--mini-root", type=Path, default=os.environ.get("MINI_SWE_AGENT_ROOT")
@@ -97,6 +103,10 @@ def main(
             }
             if args.repair_engine is not None:
                 kwargs["repair_engine"] = args.repair_engine
+            if args.provider_kind is not None:
+                kwargs["provider_kind"] = args.provider_kind
+            if args.model is not None:
+                kwargs["model"] = args.model
             campaign.run_agentforge(**kwargs)  # type: ignore[attr-defined]
         elif args.command == "run-mini":
             if args.mini_root is None:

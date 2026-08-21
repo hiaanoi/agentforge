@@ -51,14 +51,27 @@ class OpenAIModelProvider:
         client: OpenAIClient | None = None,
     ) -> None:
         self._config = config
-        self._client = client or cast(
-            OpenAIClient,
-            AsyncOpenAI(
-                api_key=config.api_key.get_secret_value(),
-                timeout=config.timeout_seconds,
-                max_retries=0,
-            ),
-        )
+        if client is not None:
+            self._client = client
+        elif config.base_url is not None:
+            self._client = cast(
+                OpenAIClient,
+                AsyncOpenAI(
+                    api_key=config.api_key.get_secret_value(),
+                    timeout=config.timeout_seconds,
+                    max_retries=0,
+                    base_url=config.base_url,
+                ),
+            )
+        else:
+            self._client = cast(
+                OpenAIClient,
+                AsyncOpenAI(
+                    api_key=config.api_key.get_secret_value(),
+                    timeout=config.timeout_seconds,
+                    max_retries=0,
+                ),
+            )
 
     @property
     def name(self) -> str:
