@@ -638,6 +638,8 @@ class AgentRuntime:
                 ):
                     raise ResumeNotAllowedError("Consumed decision could not continue")
                 run = self._runs.get(run_id)
+                if approval.tool_name == "publish_candidate_patch":
+                    return self._complete_mini_linear_publish(ownership, run)
                 ready = self._load_snapshot(
                     approvals.get(approval.approval_id), ResumePhase.READY_FOR_MODEL
                 )
