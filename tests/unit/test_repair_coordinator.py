@@ -116,6 +116,15 @@ def process_result(
     )
 
 
+def test_mark_unverified_final_terminalizes_published_candidate(tmp_path: Path) -> None:
+    coordinator, _, run, authority = setup_coordinator(tmp_path)
+
+    state = coordinator.mark_unverified_final(run.run_id, authority=authority)
+
+    assert state.status is RepairCompletionStatus.UNVERIFIED_FINAL
+    assert state.failure_reason is RepairTerminationReason.LATEST_MUTATION_NOT_VERIFIED
+
+
 def test_latest_source_is_verified_only_by_a_later_successful_development_test(
     tmp_path: Path,
 ) -> None:

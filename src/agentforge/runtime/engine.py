@@ -843,6 +843,11 @@ class AgentRuntime:
     def _complete_mini_linear_publish(
         self, ownership: RunOwnership, run: Run
     ) -> Run:
+        if self._repairs is not None:
+            self._repairs.mark_unverified_final(
+                run.run_id,
+                authority=self._authority(ownership, run.run_id),
+            )
         run.final_output = "Candidate patch published"
         run.transition_to(RunStatus.COMPLETED)
         self._runs.save(run, authority=self._authority(ownership, run.run_id))

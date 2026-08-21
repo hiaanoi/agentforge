@@ -116,6 +116,23 @@ class RepairCoordinator:
             raise TypeError("run_id must be a UUID")
         return self._workflow.get_state(run_id)
 
+    def mark_unverified_final(
+        self,
+        run_id: UUID,
+        *,
+        authority: RunLeaseAuthority,
+    ) -> RepairState:
+        state = self._workflow.get_state(run_id)
+        if state.terminal:
+            return state
+        return self._workflow.transition_terminal(
+            run_id,
+            expected_version=state.state_version,
+            status=RepairCompletionStatus.UNVERIFIED_FINAL,
+            reason=RepairTerminationReason.LATEST_MUTATION_NOT_VERIFIED,
+            authority=authority,
+        )
+
     def final_profile_id(self, run_id: object) -> str:
         from uuid import UUID
 
