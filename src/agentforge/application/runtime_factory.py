@@ -48,6 +48,12 @@ from agentforge.policy.repair import RepairPolicyEnforcer
 from agentforge.policy.sensitive import SensitiveFilePolicy
 from agentforge.process.base import ProcessTreeSupervisor
 from agentforge.process.runner import create_process_tree_supervisor
+from agentforge.repair_engines.models import RepairEngineKind
+from agentforge.runtime.candidate_patch import (
+    CandidatePatchPublisher,
+    CandidatePatchPublishTool,
+    CandidatePatchStore,
+)
 from agentforge.runtime.engine import AgentRuntime
 from agentforge.runtime.mutations import MutationCoordinator
 from agentforge.runtime.repair import RepairCoordinator
@@ -129,6 +135,7 @@ class RuntimeAssemblyRequest:
     events: EventRepository
     repair_workflow: RepairWorkflow
     max_output_chars: int
+    repair_engine: RepairEngineKind = RepairEngineKind.NATIVE
     repair_coordinator: RepairCoordinator | None = None
     supervisor_factory: Callable[[], ProcessTreeSupervisor] = (
         create_process_tree_supervisor
@@ -175,6 +182,7 @@ class RuntimeComponents(BaseModel):
     configured_profile_ids: tuple[str, ...]
     model_budget: ModelBudget
     repair_policy: RepairTaskPolicy
+    repair_engine: RepairEngineKind
     tool_names: tuple[str, ...]
     common_binding_digest: str = Field(pattern=_DIGEST_PATTERN)
 
@@ -260,6 +268,7 @@ class RuntimeComponentFactory:
             resolver,
             request.profiles,
             request.policy,
+            repair_engine=request.repair_engine,
             sensitive=sensitive,
         )
         runs = RunRepository(request.database)
@@ -308,6 +317,21 @@ class RuntimeComponentFactory:
             mutation_coordinator=mutation_coordinator,
             test_execution_coordinator=test_coordinator,
             repair_coordinator=repair_coordinator,
+            repair_engine=request.repair_engine,
+            workspace=resolver.workspace,
+            candidate_publisher=(
+                CandidatePatchPublisher(
+                    canonical_root=resolver.workspace,
+                    security=mutation_security,
+                )
+                if request.repair_engine is RepairEngineKind.MINI_LINEAR
+                else None
+            ),
+            candidate_store=(
+                CandidatePatchStore(resolver.workspace)
+                if request.repair_engine is RepairEngineKind.MINI_LINEAR
+                else None
+            ),
         )
         binding_digest = self._common_binding_digest(
             request,
@@ -334,6 +358,7 @@ class RuntimeComponentFactory:
             ),
             model_budget=request.model_budget,
             repair_policy=request.policy,
+            repair_engine=request.repair_engine,
             tool_names=tuple(tool.spec.name for tool in registry.list_tools()),
             common_binding_digest=binding_digest,
         )
@@ -379,6 +404,7 @@ class RuntimeComponentFactory:
         profiles: TestProfileRegistry,
         policy: ToolAssemblyPolicy,
         *,
+        repair_engine: RepairEngineKind = RepairEngineKind.NATIVE,
         sensitive: SensitiveFilePolicy | None = None,
     ) -> tuple[ToolRegistry, MutationSecurityPolicy]:
         sensitive_policy = sensitive or SensitiveFilePolicy()
@@ -400,6 +426,14 @@ class RuntimeComponentFactory:
         ]
         if policy.allow_file_creation:
             tools.append(WriteFileTool(mutation_security))
+        if repair_engine is RepairEngineKind.MINI_LINEAR:
+            publisher = CandidatePatchPublisher(
+                canonical_root=resolver.workspace,
+                security=mutation_security,
+            )
+            tools.append(
+                CandidatePatchPublishTool(publisher, CandidatePatchStore(resolver.workspace))
+            )
         return ToolRegistry(tools), mutation_security
 
     @staticmethod

@@ -167,10 +167,14 @@ def agentforge_runtime(
     budget_profile: str = "SWE_BENCH_PASS1",
     max_model_requests: int = 52,
     max_total_tokens: int = 600000,
+    repair_engine: str = "native",
 ) -> str:
     python = str(Path(sys.executable).resolve(strict=True)).replace("\\", "/")
     verifier = str(verifier_root.resolve(strict=True)).replace("\\", "/")
-    return f'''[provider]
+    engine_binding = (
+        "" if repair_engine == "native" else f'repair_engine = "{repair_engine}"\n\n'
+    )
+    return f'''{engine_binding}[provider]
 kind = "deepseek"
 timeout_seconds = 600.0
 temperature = 0.0

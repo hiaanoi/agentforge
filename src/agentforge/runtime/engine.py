@@ -1,6 +1,8 @@
 import hashlib
 import json
+from collections.abc import Callable
 from datetime import timedelta
+from pathlib import Path
 from time import perf_counter
 from uuid import UUID, uuid4
 
@@ -64,6 +66,7 @@ from agentforge.domain.test_execution import (
 from agentforge.models.base import (
     FinalAnswer,
     ModelProvider,
+    ModelRequest,
     ToolCall,
     parse_model_output,
 )
@@ -91,6 +94,14 @@ from agentforge.persistence.resume_workflow import (
 )
 from agentforge.persistence.run_control import RunControlRequest, RunControlWorkflow
 from agentforge.persistence.run_leases import RunLeaseStore
+from agentforge.repair_engines.mini_linear import (
+    CandidateShell,
+    MiniLinearRepairEngine,
+    SubprocessCandidateShell,
+)
+from agentforge.repair_engines.models import RepairEngineKind
+from agentforge.runtime.candidate_patch import CandidatePatchPublisher, CandidatePatchStore
+from agentforge.runtime.candidate_workspace import CandidateWorkspace
 from agentforge.runtime.mutations import (
     MutationCoordinator,
     MutationOutcomeIndeterminateError,
@@ -119,6 +130,29 @@ _RECOVERABLE_MODEL_TOOL_ERRORS = frozenset(
 )
 
 
+class _MiniLinearExecutorProvider:
+    def __init__(
+        self,
+        executor: ModelExecutor,
+        run: Run,
+        ownership: RunOwnership,
+    ) -> None:
+        self._executor = executor
+        self._run = run
+        self._ownership = ownership
+
+    @property
+    def name(self) -> str:
+        return self._executor.provider.name
+
+    @property
+    def journal_identity(self) -> str:
+        return self._executor.provider.journal_identity
+
+    async def generate(self, request: ModelRequest) -> ModelResponse:
+        return await self._executor.generate(self._run, request, ownership=self._ownership)
+
+
 class AgentRuntime:
     def __init__(
         self,
@@ -142,6 +176,11 @@ class AgentRuntime:
         lease_ttl: timedelta = timedelta(seconds=30),
         heartbeat_interval: timedelta = timedelta(seconds=5),
         owner_id: str | None = None,
+        repair_engine: RepairEngineKind = RepairEngineKind.NATIVE,
+        workspace: Path | None = None,
+        candidate_shell_factory: Callable[[Path], CandidateShell] | None = None,
+        candidate_publisher: CandidatePatchPublisher | None = None,
+        candidate_store: CandidatePatchStore | None = None,
     ) -> None:
         self._runs = run_repository
         self._events = event_repository
@@ -165,6 +204,11 @@ class AgentRuntime:
         self._lease_ttl = lease_ttl
         self._heartbeat_interval = heartbeat_interval
         self._owner_id = owner_id or f"runtime:{uuid4()}"
+        self._repair_engine = repair_engine
+        self._workspace = workspace.resolve(strict=True) if workspace is not None else None
+        self._candidate_shell_factory = candidate_shell_factory or SubprocessCandidateShell
+        self._candidate_publisher = candidate_publisher
+        self._candidate_store = candidate_store
 
     def create_run(
         self,
@@ -263,6 +307,8 @@ class AgentRuntime:
         authority = self._authority(ownership, run.run_id)
         self._runs.save(run, authority=authority)
         self._append_event(ownership, run.run_id, EventType.RUN_STARTED)
+        if self._repair_engine is RepairEngineKind.MINI_LINEAR:
+            return await self._run_mini_linear(ownership, run)
         return await self._run_loop(
             ownership,
             run,
@@ -272,6 +318,66 @@ class AgentRuntime:
                 if initial_context_items is not None
                 else None
             ),
+        )
+
+    async def _run_mini_linear(self, ownership: RunOwnership, run: Run) -> Run:
+        if (
+            self._workspace is None
+            or self._candidate_publisher is None
+            or self._candidate_store is None
+        ):
+            raise RuntimeError("Mini linear runtime is missing candidate workspace components")
+        candidate = CandidateWorkspace.create(self._workspace, run_id=run.run_id)
+        model = (
+            _MiniLinearExecutorProvider(self._model_executor, run, ownership)
+            if self._model_executor is not None
+            else self._model
+        )
+        engine = MiniLinearRepairEngine(model, self._candidate_shell_factory(candidate.root))
+        result = await engine.run(
+            run_id=run.run_id,
+            task=run.task,
+            max_steps=run.max_steps,
+        )
+        run.current_step = result.model_calls
+        self._runs.save(run, authority=self._authority(ownership, run.run_id))
+        if not result.submitted:
+            return self._fail(
+                ownership,
+                run,
+                f"Maximum step count of {run.max_steps} exhausted before candidate submission",
+            )
+        patch = self._candidate_publisher.capture(candidate.root)
+        self._candidate_store.save(str(run.run_id), patch)
+        history = json.loads(json.dumps(result.history))
+        context = self._context_builder.build(
+            task=run.task,
+            items=[],
+            step_number=run.current_step,
+        )
+        final_call = ToolCall(
+            type="tool_call",
+            call_id=f"candidate-patch-{run.run_id}",
+            tool="publish_candidate_patch",
+            arguments={"run_id": str(run.run_id)},
+            reason="Publish the submitted candidate patch after final approval",
+        )
+        return self._pause_for_approval(
+            ownership,
+            run,
+            final_call,
+            ApprovalRequired(
+                tool_name=final_call.tool,
+                validated_arguments=final_call.arguments,
+                sanitized_arguments=final_call.arguments,
+            ),
+            history,
+            [],
+            LoopState(),
+            context.state,
+            None,
+            None,
+            None,
         )
 
     def _evaluator_only_fail_created(self, run_id: UUID, reason: str) -> Run:
@@ -683,6 +789,12 @@ class AgentRuntime:
             ):
                 raise ResumeNotAllowedError("Consumed decision could not continue")
             run = self._runs.get(run_id)
+            if (
+                self._repair_engine is RepairEngineKind.MINI_LINEAR
+                and snapshot.pending_tool_call is not None
+                and snapshot.pending_tool_call.tool == "publish_candidate_patch"
+            ):
+                return self._complete_mini_linear_publish(ownership, run)
             if self._repairs is not None:
                 repair_state = self._repairs.state(run_id)
                 if repair_state.terminal:
@@ -727,6 +839,20 @@ class AgentRuntime:
             return self._runs.get(run_id)
         finally:
             self._active_runs.discard(run_id)
+
+    def _complete_mini_linear_publish(
+        self, ownership: RunOwnership, run: Run
+    ) -> Run:
+        run.final_output = "Candidate patch published"
+        run.transition_to(RunStatus.COMPLETED)
+        self._runs.save(run, authority=self._authority(ownership, run.run_id))
+        self._append_event(
+            ownership,
+            run.run_id,
+            EventType.RUN_COMPLETED,
+            {"final_output": run.final_output},
+        )
+        return run
 
     async def _consume_decision(
         self,

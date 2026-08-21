@@ -32,6 +32,7 @@ from agentforge.persistence.legacy_evaluator import LegacyEvaluatorEventReposito
 from agentforge.persistence.profile_trust import ProfileKernel
 from agentforge.persistence.repair_terminal import RepairStateProvenance
 from agentforge.persistence.repair_workflow import RepairWorkflow
+from agentforge.repair_engines.models import RepairEngineKind
 from agentforge.runtime.repair import RepairCoordinator
 from agentforge.tools.paths import WorkspacePathResolver
 from agentforge.tools.testing.profiles import (
@@ -158,6 +159,18 @@ def test_product_and_pilot_use_same_runtime_components(tmp_path: Path) -> None:
     assert product.common_binding_digest == pilot.common_binding_digest
     assert "git_status" in product.tool_names
     assert "git_log" in product.tool_names
+
+
+def test_mini_linear_runtime_exposes_only_the_final_candidate_publish_tool(
+    tmp_path: Path,
+) -> None:
+    request = _request(tmp_path)
+    components = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_LINEAR)
+    )
+
+    assert "publish_candidate_patch" in components.tool_names
+    assert "publish_candidate_patch" not in RuntimeComponentFactory().build(request).tool_names
 
 
 def test_public_runtime_request_rejects_workflow_injection(tmp_path: Path) -> None:

@@ -89,6 +89,7 @@ class Verified10Campaign:
         self._agentforge_max_total_tokens = (
             600000 if self.protocol.agentforge_budget.logical_model_calls == 50 else 1200000
         )
+        self._active_repair_engine: Literal["native", "mini_linear"] = "native"
 
     @staticmethod
     def _safe_root(requested: Path) -> Path:
@@ -463,7 +464,9 @@ class Verified10Campaign:
         recover_running: bool = False,
         retry_failed: bool = False,
         task_ids: tuple[str, ...] | None = None,
+        repair_engine: Literal["native", "mini_linear"] = "native",
     ) -> None:
+        self._active_repair_engine = repair_engine
         tasks = self._select_tasks(task_ids)
         self._run_arm(
             BenchmarkArm.AGENTFORGE,
@@ -471,6 +474,7 @@ class Verified10Campaign:
             retry_failed=retry_failed,
             mini_root=None,
             tasks=tasks,
+            repair_engine=repair_engine,
         )
 
     def _select_tasks(self, task_ids: tuple[str, ...] | None) -> tuple[Verified10Task, ...]:
@@ -510,6 +514,7 @@ class Verified10Campaign:
         retry_failed: bool,
         mini_root: Path | None,
         tasks: tuple[Verified10Task, ...] | None = None,
+        repair_engine: Literal["native", "mini_linear"] = "native",
     ) -> None:
         if retry_failed:
             raise CampaignExecutionError("Protocol permits one attempt; --retry-failed is invalid")
@@ -539,7 +544,7 @@ class Verified10Campaign:
                     )
                     continue
                 try:
-                    attempt = self._recover_agentforge(task, state, existing)
+                    attempt = self._recover_agentforge(task, state, existing, repair_engine)
                 except CampaignExecutionError as exc:
                     attempt = self._preserve_failed_agentforge(
                         task, existing, str(exc), time.monotonic()
@@ -554,7 +559,9 @@ class Verified10Campaign:
             self._store_attempt(arm, running)
             started = time.monotonic()
             try:
-                attempt = self._execute_attempt(arm, task, self._load(), mini_root, started)
+                attempt = self._execute_attempt(
+                    arm, task, self._load(), mini_root, started, repair_engine
+                )
             except CampaignExecutionError as exc:
                 durable = self._records(self._load(), arm).get(task.instance_id)
                 if (
@@ -595,6 +602,7 @@ class Verified10Campaign:
         state: CampaignState,
         mini_root: Path | None,
         started: float,
+        repair_engine: Literal["native", "mini_linear"],
     ) -> CampaignAttempt:
         workspace_record = state.workspaces[f"{arm.value}:{task.instance_id}"]
         workspace = _resolve_under_root(self.root, workspace_record.path)
@@ -603,7 +611,7 @@ class Verified10Campaign:
                 raise CampaignExecutionError("mini root is required")
             return self._execute_mini(task, mini_root, workspace_record, started)
         return self._execute_agentforge(
-            task, workspace, state.public_tasks[task.instance_id], started
+            task, workspace, state.public_tasks[task.instance_id], started, repair_engine
         )
 
     _mini_config = staticmethod(mini_config)
@@ -827,6 +835,7 @@ class Verified10Campaign:
                 budget_profile=self._agentforge_budget_profile,
                 max_model_requests=self._agentforge_max_model_requests,
                 max_total_tokens=self._agentforge_max_total_tokens,
+                repair_engine=self._active_repair_engine,
             ).encode(),
         )
         try:
@@ -877,8 +886,14 @@ class Verified10Campaign:
         )
 
     def _execute_agentforge(
-        self, task: Verified10Task, workspace: Path, problem_statement: str, started: float
+        self,
+        task: Verified10Task,
+        workspace: Path,
+        problem_statement: str,
+        started: float,
+        repair_engine: Literal["native", "mini_linear"],
     ) -> CampaignAttempt:
+        self._active_repair_engine = repair_engine
         self._preflight_agentforge(workspace, task)
         common = self._af_common(workspace)
         for profile, purpose in (("compile", "development"), ("verify", "verification")):
@@ -933,7 +948,11 @@ class Verified10Campaign:
         )
 
     def _recover_agentforge(
-        self, task: Verified10Task, state: CampaignState, existing: CampaignAttempt
+        self,
+        task: Verified10Task,
+        state: CampaignState,
+        existing: CampaignAttempt,
+        repair_engine: Literal["native", "mini_linear"],
     ) -> CampaignAttempt:
         assert existing.run_id is not None
         workspace = _resolve_under_root(
