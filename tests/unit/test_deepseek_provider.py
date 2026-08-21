@@ -358,7 +358,7 @@ async def test_openai_chat_relay_provider_uses_openai_identity() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_chat_relay_uses_max_completion_tokens() -> None:
+async def test_openai_chat_relay_omits_unsupported_token_limit_parameter() -> None:
     from agentforge.models.openai_chat_provider import OpenAIChatCompletionsProvider
 
     client = FakeClient(response(calls=[function_call()]))
@@ -375,7 +375,7 @@ async def test_openai_chat_relay_uses_max_completion_tokens() -> None:
     await provider.generate(model_request())
 
     sent = client.chat.completions.requests[0]
-    assert sent["max_completion_tokens"] == 800
+    assert "max_completion_tokens" not in sent
     assert "max_tokens" not in sent
 
 
