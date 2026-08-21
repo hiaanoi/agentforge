@@ -26,6 +26,8 @@ _MINI_SYSTEM_PROMPT = (
     "You are a helpful assistant that can interact with a computer shell to solve "
     "programming tasks."
 )
+_MAX_OBSERVATION_CHARS = 10_000
+_MAX_HISTORY_ITEMS = 12
 
 
 def _mini_task_prompt(task: str) -> str:
@@ -53,6 +55,13 @@ Recommended workflow:
 4. Run the narrowest useful verification.
 5. When the fix is ready and verified, return a final answer to submit the candidate.
 </instructions>"""
+
+
+def _bound_observation(output: str) -> str:
+    if len(output) <= _MAX_OBSERVATION_CHARS:
+        return output
+    half = _MAX_OBSERVATION_CHARS // 2
+    return output[:half] + "\n...[output truncated]...\n" + output[-half:]
 
 
 class SubprocessCandidateShell:
@@ -148,7 +157,7 @@ class MiniLinearRepairEngine:
                     "call_id": call_id,
                 }
             )
-            output = await self._shell.execute(command)
+            output = _bound_observation(await self._shell.execute(command))
             history.append(
                 {
                     "kind": "TOOL_RESULT",
@@ -156,4 +165,5 @@ class MiniLinearRepairEngine:
                     "call_id": call_id,
                 }
             )
+            del history[:-_MAX_HISTORY_ITEMS]
         return MiniLinearResult(submitted=False, history=history, model_calls=max_steps)

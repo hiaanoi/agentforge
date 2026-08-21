@@ -44,6 +44,21 @@ class _Shell:
         return "VALUE = 1\n"
 
 
+class _LongLoopModel(_Model):
+    def __init__(self) -> None:
+        super().__init__()
+        self.responses = [
+            ToolCall(type="tool_call", tool="bash", arguments={"command": "echo ok"})
+            for _ in range(12)
+        ] + [FinalAnswer(type="final", answer="submitted")]
+
+
+class _LongShell:
+    async def execute(self, command: str) -> str:
+        assert command == "echo ok"
+        return "x" * 20_000
+
+
 @pytest.mark.asyncio
 async def test_mini_linear_engine_appends_shell_observation_before_next_turn() -> None:
     from agentforge.repair_engines.mini_linear import MiniLinearRepairEngine
@@ -76,6 +91,24 @@ async def test_mini_linear_engine_uses_swe_task_prompt_contract() -> None:
     assert "<pr_description>" in task
     assert "DO NOT MODIFY: Tests" in task
     assert model.requests[0].history == []
+
+
+@pytest.mark.asyncio
+async def test_mini_linear_engine_bounds_observations_and_history() -> None:
+    from agentforge.repair_engines.mini_linear import MiniLinearRepairEngine
+
+    model = _LongLoopModel()
+    result = await MiniLinearRepairEngine(model, _LongShell()).run(
+        run_id=uuid4(), task="repair module", max_steps=13
+    )
+
+    assert result.submitted
+    assert len(model.requests[-1].history) <= 12
+    assert all(
+        len(str(item.get("payload", ""))) <= 10_500
+        for item in model.requests[-1].history
+        if isinstance(item, dict)
+    )
 
 
 @pytest.mark.asyncio
