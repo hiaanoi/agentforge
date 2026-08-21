@@ -204,7 +204,7 @@ class AgentRuntime:
         self._lease_ttl = lease_ttl
         self._heartbeat_interval = heartbeat_interval
         self._owner_id = owner_id or f"runtime:{uuid4()}"
-        self._repair_engine = repair_engine
+        self._repair_engine = RepairEngineKind(repair_engine)
         self._workspace = workspace.resolve(strict=True) if workspace is not None else None
         self._candidate_shell_factory = candidate_shell_factory or SubprocessCandidateShell
         self._candidate_publisher = candidate_publisher
@@ -706,10 +706,7 @@ class AgentRuntime:
                 elif run.status is not RunStatus.RUNNING:
                     raise ResumeNotAllowedError("Consumed approval Run is not recoverable")
                 run = self._runs.get(run_id)
-                if (
-                    self._repair_engine is RepairEngineKind.MINI_LINEAR
-                    and approval.tool_name == "publish_candidate_patch"
-                ):
+                if approval.tool_name == "publish_candidate_patch":
                     return self._complete_mini_linear_publish(ownership, run)
                 if self._repairs is not None:
                     repair_state = self._repairs.state(run_id)
@@ -794,10 +791,7 @@ class AgentRuntime:
             ):
                 raise ResumeNotAllowedError("Consumed decision could not continue")
             run = self._runs.get(run_id)
-            if (
-                self._repair_engine is RepairEngineKind.MINI_LINEAR
-                and approval.tool_name == "publish_candidate_patch"
-            ):
+            if approval.tool_name == "publish_candidate_patch":
                 return self._complete_mini_linear_publish(ownership, run)
             if self._repairs is not None:
                 repair_state = self._repairs.state(run_id)

@@ -216,6 +216,38 @@ async def test_mini_linear_final_patch_publishes_after_approval_and_resume(
 
 
 @pytest.mark.asyncio
+async def test_mini_linear_publish_approval_terminalizes_string_bound_engine(
+    tmp_path: Path,
+) -> None:
+    canonical, _ = _git_workspaces(tmp_path)
+    security = MutationSecurityPolicy(
+        WorkspacePathResolver(canonical), SensitiveFilePolicy(), MutationLimits()
+    )
+    publisher = CandidatePatchPublisher(canonical_root=canonical, security=security)
+    store = CandidatePatchStore(canonical)
+    runtime, database = _runtime(
+        canonical,
+        CandidatePatchPublishTool(publisher, store),
+        model=CandidateThenSubmitModel(),
+        # A persisted runtime definition can arrive as the string value after
+        # a cross-process resume; the terminal publish rule must still apply.
+        repair_engine="mini_linear",  # type: ignore[arg-type]
+        candidate_shell_factory=WriteCandidateShell,
+        candidate_publisher=publisher,
+        candidate_store=store,
+    )
+    run = runtime.create_run("repair candidate", max_steps=4)
+
+    await runtime.execute(run.run_id)
+    approval = runtime.list_pending_approvals(run.run_id)[0]
+    runtime.approve(approval.approval_id)
+    completed = await runtime.resume(run.run_id)
+
+    assert completed.status is RunStatus.COMPLETED
+    database.close()
+
+
+@pytest.mark.asyncio
 async def test_mini_linear_routes_each_model_turn_through_the_model_executor(
     tmp_path: Path,
 ) -> None:
