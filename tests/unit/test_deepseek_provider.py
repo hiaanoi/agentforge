@@ -338,6 +338,26 @@ async def test_provider_prefers_tool_call_and_audits_discarded_text() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openai_chat_relay_provider_uses_openai_identity() -> None:
+    from agentforge.models.openai_chat_provider import OpenAIChatCompletionsProvider
+
+    provider = OpenAIChatCompletionsProvider(
+        ModelProviderConfig(
+            api_key="secret",
+            model="gpt-5.4-mini",
+            base_url="https://relay.example/v1",
+        ),
+        client=FakeClient(response(calls=[function_call()])),
+    )
+
+    result = await provider.generate(model_request())
+
+    assert provider.name == "openai"
+    assert provider.journal_identity == "openai/gpt-5.4-mini"
+    assert isinstance(result.action, ToolCall)
+
+
+@pytest.mark.asyncio
 async def test_provider_can_preserve_tool_call_text_for_linear_agent_history() -> None:
     provider = DeepSeekModelProvider(
         ModelProviderConfig(api_key="secret", model="deepseek-account-model"),

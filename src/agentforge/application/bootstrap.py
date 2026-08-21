@@ -47,6 +47,7 @@ from agentforge.domain.repair import RepairTaskPolicy
 from agentforge.models.deepseek_provider import DeepSeekModelProvider
 from agentforge.models.domain import ModelBudget, ModelProviderConfig
 from agentforge.models.mock import MockModelProvider
+from agentforge.models.openai_chat_provider import OpenAIChatCompletionsProvider
 from agentforge.models.openai_provider import OpenAIModelProvider
 from agentforge.persistence.database import Database
 from agentforge.persistence.repair_workflow import RepairWorkflow
@@ -264,10 +265,18 @@ def _build_provider(
         return MockModelProvider(
             list(definition.mock_responses), model_id=config.model, response_by_step=True
         )
-    provider_type: type[OpenAIModelProvider] | type[DeepSeekModelProvider]
+    provider_type: (
+        type[OpenAIModelProvider]
+        | type[DeepSeekModelProvider]
+        | type[OpenAIChatCompletionsProvider]
+    )
     if definition.kind == "openai":
         environment_name = "OPENAI_API_KEY"
-        provider_type = OpenAIModelProvider
+        provider_type = (
+            OpenAIChatCompletionsProvider
+            if os.environ.get("OPENAI_BASE_URL")
+            else OpenAIModelProvider
+        )
     else:
         environment_name = "DEEPSEEK_API_KEY"
         provider_type = DeepSeekModelProvider

@@ -53,15 +53,18 @@ class DeepSeekModelProvider:
         client: DeepSeekClient | None = None,
     ) -> None:
         self._config = config
-        self._client = client or cast(
-            DeepSeekClient,
-            AsyncOpenAI(
-                api_key=config.api_key.get_secret_value(),
-                base_url=DEEPSEEK_BASE_URL,
-                timeout=config.timeout_seconds,
-                max_retries=0,
-            ),
-        )
+        if client is not None:
+            self._client = client
+        else:
+            self._client = cast(
+                DeepSeekClient,
+                AsyncOpenAI(
+                    api_key=config.api_key.get_secret_value(),
+                    base_url=config.base_url or DEEPSEEK_BASE_URL,
+                    timeout=config.timeout_seconds,
+                    max_retries=0,
+                ),
+            )
 
     @property
     def name(self) -> str:
@@ -82,8 +85,9 @@ class DeepSeekModelProvider:
             "messages": messages,
             "stream": False,
             "n": 1,
-            "extra_body": {"thinking": {"type": "disabled"}},
         }
+        if self.name == "deepseek":
+            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
         if self._config.temperature is not None:
             kwargs["temperature"] = self._config.temperature
         if request.tools:
