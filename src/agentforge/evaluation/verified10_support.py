@@ -141,7 +141,7 @@ def agentforge_config() -> str:
         'database_path = ".agentforge/agentforge.db"\n'
         'model = "deepseek-v4-flash"\n'
         "max_steps = 80\n"
-        'profile_ids = ["compile", "verify"]\n'
+        'profile_ids = ["compile", "default", "verify"]\n'
     )
 
 
@@ -194,7 +194,7 @@ budget_profile = "{budget_profile}"
 allowed_write_paths = ["**"]
 forbidden_write_paths = [".agentforge/**", ".git/**"]
 protected_paths = [".agentforge/**", ".git/**"]
-allowed_development_test_profiles = ["compile"]
+allowed_development_test_profiles = ["compile", "default"]
 final_verification_profile_id = "verify"
 allow_file_creation = true
 allowed_create_paths = ["**"]
@@ -203,6 +203,18 @@ max_changed_files = 20
 max_total_changed_bytes = 5242880
 max_single_file_changed_bytes = 1048576
 path_case_sensitive = false
+
+[[profiles]]
+profile_id = "default"
+name = "Default development capability"
+description = "Default development verification profile"
+executable = "{python}"
+argv = ["-m", "compileall", "-q", "."]
+cwd = "."
+timeout_seconds = 120
+max_output_bytes = 4096
+profile_version = 1
+purpose = "development"
 
 [[profiles]]
 profile_id = "compile"

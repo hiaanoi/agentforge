@@ -809,7 +809,7 @@ def test_generated_agentforge_files_pass_product_loaders_without_secrets(
             "database_path": ".agentforge/agentforge.db",
             "model": "deepseek-v4-flash",
             "max_steps": 80,
-            "profile_ids": ("compile", "verify"),
+            "profile_ids": ("compile", "default", "verify"),
         },
     )
     runtime = ProductRuntimeDefinitionLoader().load(workspace, config=config)
@@ -819,7 +819,7 @@ def test_generated_agentforge_files_pass_product_loaders_without_secrets(
 
     assert config.model == "deepseek-v4-flash"
     assert config.max_steps == 80
-    assert runtime.profile_ids == ("compile", "verify")
+    assert runtime.profile_ids == ("compile", "default", "verify")
     assert runtime.model_budget.model_dump() == {
         "max_model_requests": 52,
         "max_retries": 2,
@@ -833,6 +833,7 @@ def test_generated_agentforge_files_pass_product_loaders_without_secrets(
     assert "temperature = 0.0" in runtime_text
     assert tuple(profile.profile_id for profile in registry.list_enabled()) == (
         "compile",
+        "default",
         "verify",
     )
 
