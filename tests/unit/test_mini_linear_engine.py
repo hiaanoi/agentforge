@@ -1,3 +1,5 @@
+import subprocess
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -55,3 +57,19 @@ async def test_mini_linear_engine_appends_shell_observation_before_next_turn() -
     assert result.submitted
     assert shell.commands == ["cat src/module.py"]
     assert "VALUE = 1" in model.requests[1].history[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_candidate_shell_runs_bash_in_candidate_root(tmp_path: Path) -> None:
+    from agentforge.repair_engines.mini_linear import SubprocessCandidateShell
+
+    calls: list[tuple[tuple[str, ...], Path]] = []
+
+    def runner(arguments: tuple[str, ...], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+        calls.append((arguments, cwd))
+        return subprocess.CompletedProcess(arguments, 0, stdout="ok\n", stderr="")
+
+    output = await SubprocessCandidateShell(tmp_path, runner=runner).execute("pwd")
+
+    assert calls == [(('bash', '-c', 'pwd'), tmp_path)]
+    assert output == "<returncode>0</returncode>\n<output>ok\n</output>"

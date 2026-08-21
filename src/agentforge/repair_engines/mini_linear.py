@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 from uuid import UUID
 
@@ -11,6 +15,40 @@ from agentforge.models.base import FinalAnswer, ModelProvider, ModelRequest
 
 class CandidateShell(Protocol):
     async def execute(self, command: str) -> str: ...
+
+
+CandidateShellRunner = Callable[..., subprocess.CompletedProcess[str]]
+
+
+class SubprocessCandidateShell:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        runner: CandidateShellRunner | None = None,
+    ) -> None:
+        self._root = root.resolve(strict=True)
+        self._runner = runner or self._run
+
+    async def execute(self, command: str) -> str:
+        completed = await asyncio.to_thread(
+            self._runner,
+            ("bash", "-c", command),
+            cwd=self._root,
+        )
+        output = completed.stdout + completed.stderr
+        return f"<returncode>{completed.returncode}</returncode>\n<output>{output}</output>"
+
+    @staticmethod
+    def _run(arguments: tuple[str, ...], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            arguments,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
 
 
 @dataclass(frozen=True, slots=True)
