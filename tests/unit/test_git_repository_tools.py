@@ -530,6 +530,22 @@ def test_git_tools_reject_nested_gitlink_without_conventional_indicators(
     assert "nested-child" not in str(raised.value)
 
 
+@pytest.mark.parametrize("tool", [GitStatusTool, GitLogTool])
+def test_git_tools_ignore_agentforge_control_workspace_git(
+    git_workspace: Path,
+    tool: type[GitStatusTool] | type[GitLogTool],
+) -> None:
+    control_workspace = (
+        git_workspace / ".agentforge" / "candidates" / "run" / "workspace"
+    )
+    control_workspace.mkdir(parents=True)
+    _git(control_workspace, "init", "--quiet")
+
+    result = tool(WorkspacePathResolver(git_workspace)).execute(tool.arguments_model())
+
+    assert result.success is True
+
+
 @pytest.mark.parametrize("indicator_kind", ["directory", "file"])
 def test_git_tool_rejects_nested_git_created_during_launch(
     git_workspace: Path,

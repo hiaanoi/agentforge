@@ -669,6 +669,11 @@ def _scan_workspace_for_nested_git(
                 if canonical_name in canonical_names:
                     raise OSError("workspace contains a canonical name collision")
                 canonical_names.add(canonical_name)
+                if current == workspace and canonical_name == ".agentforge":
+                    metadata = entry.stat(follow_symlinks=False)
+                    if not stat.S_ISDIR(metadata.st_mode) or _is_link_or_reparse(metadata):
+                        raise OSError("AgentForge control directory is unsafe")
+                    continue
                 if canonical_name == ".git":
                     if current == workspace and entry.name == ".git":
                         continue
