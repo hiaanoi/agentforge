@@ -17,6 +17,7 @@ class ModelRequest(BaseModel):
     task: str = Field(min_length=1)
     step_number: int = Field(gt=0)
     instructions: str | None = None
+    preserve_tool_call_text: bool = False
     history: list[JsonValue] = Field(default_factory=list)
     tools: list[ToolSpec] = Field(default_factory=list)
 

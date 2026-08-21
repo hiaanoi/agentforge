@@ -133,6 +133,7 @@ class MiniLinearRepairEngine:
                     task=task_prompt,
                     step_number=step,
                     instructions=_MINI_SYSTEM_PROMPT,
+                    preserve_tool_call_text=True,
                     history=history,
                     tools=[_BASH_TOOL],
                 )
@@ -156,6 +157,7 @@ class MiniLinearRepairEngine:
                     "payload": {
                         "tool": "bash",
                         "arguments": {"command": command},
+                        "reason": action.reason,
                     },
                     "call_id": call_id,
                 }

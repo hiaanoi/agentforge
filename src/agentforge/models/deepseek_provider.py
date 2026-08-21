@@ -239,6 +239,7 @@ class DeepSeekModelProvider:
                     call_id=call_id,
                     tool=name,
                     arguments=arguments,
+                    reason=final_text if request.preserve_tool_call_text else None,
                 ),
                 len(calls),
                 multi_tool_response,
@@ -382,7 +383,11 @@ class DeepSeekModelProvider:
         ):
             return {
                 "role": "assistant",
-                "content": None,
+                "content": (
+                    payload.get("reason")
+                    if isinstance(payload.get("reason"), str)
+                    else None
+                ),
                 "tool_calls": [
                     {
                         "id": call_id,

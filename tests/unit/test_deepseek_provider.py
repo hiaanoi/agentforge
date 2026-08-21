@@ -79,7 +79,9 @@ def tool_spec(
     )
 
 
-def model_request(*, tools: list[ToolSpec] | None = None) -> ModelRequest:
+def model_request(
+    *, tools: list[ToolSpec] | None = None, preserve_tool_call_text: bool = False
+) -> ModelRequest:
     return ModelRequest(
         task="repair the repository",
         instructions="Use only registered tools.",
@@ -97,6 +99,7 @@ def model_request(*, tools: list[ToolSpec] | None = None) -> ModelRequest:
             ).model_dump(mode="json"),
         ],
         tools=tools if tools is not None else [tool_spec()],
+        preserve_tool_call_text=preserve_tool_call_text,
     )
 
 
@@ -332,6 +335,21 @@ async def test_provider_prefers_tool_call_and_audits_discarded_text() -> None:
     assert result.sanitized_metadata["provider_contract_deviation"] is True
     serialized = json.dumps(result.model_dump(mode="json"))
     assert "Sensitive explanatory text" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_provider_can_preserve_tool_call_text_for_linear_agent_history() -> None:
+    provider = DeepSeekModelProvider(
+        ModelProviderConfig(api_key="secret", model="deepseek-account-model"),
+        client=FakeClient(
+            response(content="THOUGHT inspect source", calls=[function_call()])
+        ),
+    )
+
+    result = await provider.generate(model_request(preserve_tool_call_text=True))
+
+    assert isinstance(result.action, ToolCall)
+    assert result.action.reason == "THOUGHT inspect source"
 
 
 @pytest.mark.asyncio
