@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+import json
 import os
 import subprocess
 from dataclasses import dataclass
@@ -24,6 +26,64 @@ class CandidatePatchEntry:
 @dataclass(frozen=True, slots=True)
 class CandidatePatch:
     entries: tuple[CandidatePatchEntry, ...]
+
+
+class CandidatePatchStore:
+    _FILENAME = "candidate-patch.json"
+
+    def __init__(self, canonical_root: Path) -> None:
+        self._canonical_root = canonical_root.resolve(strict=True)
+        self._root = self._canonical_root / ".agentforge" / "candidates"
+
+    def save(self, run_key: str, patch: CandidatePatch) -> Path:
+        if not run_key or Path(run_key).name != run_key:
+            raise ValueError("Candidate patch run key must be one path component")
+        path = self._root / run_key / self._FILENAME
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema_version": 1,
+            "entries": [
+                {
+                    "target_path": entry.target_path,
+                    "data_base64": base64.b64encode(entry.data).decode("ascii"),
+                    "plan": entry.plan.model_dump(mode="json"),
+                }
+                for entry in patch.entries
+            ],
+        }
+        path.write_text(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")), encoding="utf-8"
+        )
+        return path
+
+    def load(self, path: Path) -> CandidatePatch:
+        resolved = path.resolve(strict=True)
+        try:
+            relative = resolved.relative_to(self._root.resolve(strict=True))
+        except ValueError as exc:
+            raise ValueError("Candidate patch manifest lies outside the candidate store") from exc
+        if len(relative.parts) != 2 or relative.name != self._FILENAME:
+            raise ValueError("Candidate patch manifest path is invalid")
+        try:
+            payload = json.loads(resolved.read_text(encoding="utf-8"))
+            if payload.get("schema_version") != 1 or not isinstance(payload.get("entries"), list):
+                raise ValueError
+            entries = tuple(
+                CandidatePatchEntry(
+                    target_path=item["target_path"],
+                    data=base64.b64decode(item["data_base64"], validate=True),
+                    plan=MutationPlan.model_validate(item["plan"]),
+                )
+                for item in payload["entries"]
+            )
+        except (KeyError, TypeError, UnicodeDecodeError, ValueError) as exc:
+            raise ValueError("Candidate patch manifest is invalid") from exc
+        for entry in entries:
+            if entry.target_path != entry.plan.target_path:
+                raise ValueError("Candidate patch manifest target does not match its plan")
+            if hashlib.sha256(entry.data).hexdigest() != entry.plan.expected_after_sha256:
+                raise ValueError("Candidate patch manifest bytes do not match its plan")
+        return CandidatePatch(entries=entries)
 
 
 class CandidatePatchPublisher:

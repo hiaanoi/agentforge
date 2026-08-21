@@ -7,7 +7,7 @@ import pytest
 from agentforge.domain.enums import ToolErrorCode
 from agentforge.domain.errors import ToolExecutionError
 from agentforge.policy.sensitive import SensitiveFilePolicy
-from agentforge.runtime.candidate_patch import CandidatePatchPublisher
+from agentforge.runtime.candidate_patch import CandidatePatchPublisher, CandidatePatchStore
 from agentforge.tools.mutation.base import MutationLimits
 from agentforge.tools.mutation.security import MutationSecurityPolicy
 from agentforge.tools.paths import WorkspacePathResolver
@@ -58,6 +58,19 @@ def test_candidate_patch_rejects_file_deletion_without_publishing(tmp_path: Path
 
     assert raised.value.code is ToolErrorCode.TOOL_EXECUTION_ERROR
     assert (canonical / "src" / "module.py").read_text(encoding="utf-8") == "value = 1\n"
+
+
+def test_saved_candidate_patch_can_be_reopened_and_published_after_restart(tmp_path: Path) -> None:
+    canonical, candidate, publisher = _candidate_and_publisher(tmp_path)
+    (candidate / "src" / "module.py").write_text("value = 2\n", encoding="utf-8")
+
+    patch = publisher.capture(candidate)
+    manifest = CandidatePatchStore(canonical).save("run-1", patch)
+    reopened = CandidatePatchStore(canonical).load(manifest)
+
+    assert (canonical / "src" / "module.py").read_text(encoding="utf-8") == "value = 1\n"
+    publisher.publish(reopened)
+    assert (canonical / "src" / "module.py").read_text(encoding="utf-8") == "value = 2\n"
 
 
 def _git(root: Path, *arguments: str) -> None:
