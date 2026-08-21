@@ -90,6 +90,7 @@ async def test_mini_linear_engine_uses_swe_task_prompt_contract() -> None:
     assert isinstance(system, str) and "interact with a computer shell" in system
     assert "<pr_description>" in task
     assert "DO NOT MODIFY: Tests" in task
+    assert "do not cd to /workspace or /testbed" in task
     assert model.requests[0].history == []
 
 
