@@ -317,6 +317,21 @@ class RuntimeComponentFactory:
             mutation_coordinator=mutation_coordinator,
             test_execution_coordinator=test_coordinator,
             repair_coordinator=repair_coordinator,
+            repair_engine=request.repair_engine,
+            workspace=resolver.workspace,
+            candidate_publisher=(
+                CandidatePatchPublisher(
+                    canonical_root=resolver.workspace,
+                    security=mutation_security,
+                )
+                if request.repair_engine is RepairEngineKind.MINI_LINEAR
+                else None
+            ),
+            candidate_store=(
+                CandidatePatchStore(resolver.workspace)
+                if request.repair_engine is RepairEngineKind.MINI_LINEAR
+                else None
+            ),
         )
         binding_digest = self._common_binding_digest(
             request,

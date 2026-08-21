@@ -10,7 +10,8 @@ from uuid import UUID
 
 from agentforge.domain.enums import ToolRisk
 from agentforge.domain.models import ToolSpec
-from agentforge.models.base import FinalAnswer, ModelProvider, ModelRequest
+from agentforge.models.base import FinalAnswer, ModelProvider, ModelRequest, parse_model_output
+from agentforge.models.domain import ModelResponse
 
 
 class CandidateShell(Protocol):
@@ -94,7 +95,11 @@ class MiniLinearRepairEngine:
                     tools=[_BASH_TOOL],
                 )
             )
-            action = response.action
+            action = (
+                response.action
+                if isinstance(response, ModelResponse)
+                else parse_model_output(response)
+            )
             if isinstance(action, FinalAnswer):
                 return MiniLinearResult(submitted=True, history=history, model_calls=step)
             if action.tool != "bash":
