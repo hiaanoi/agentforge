@@ -708,8 +708,7 @@ class AgentRuntime:
                 run = self._runs.get(run_id)
                 if (
                     self._repair_engine is RepairEngineKind.MINI_LINEAR
-                    and snapshot.pending_tool_call is not None
-                    and snapshot.pending_tool_call.tool == "publish_candidate_patch"
+                    and approval.tool_name == "publish_candidate_patch"
                 ):
                     return self._complete_mini_linear_publish(ownership, run)
                 if self._repairs is not None:
@@ -797,8 +796,7 @@ class AgentRuntime:
             run = self._runs.get(run_id)
             if (
                 self._repair_engine is RepairEngineKind.MINI_LINEAR
-                and snapshot.pending_tool_call is not None
-                and snapshot.pending_tool_call.tool == "publish_candidate_patch"
+                and approval.tool_name == "publish_candidate_patch"
             ):
                 return self._complete_mini_linear_publish(ownership, run)
             if self._repairs is not None:
