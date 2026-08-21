@@ -114,7 +114,7 @@ class CandidatePatchPublishTool:
             name="publish_candidate_patch",
             description="Publish the saved candidate patch after final approval.",
             input_schema=self.input_model.model_json_schema(),
-            risk_level=ToolRisk.DANGEROUS,
+            risk_level=ToolRisk.WRITE,
             requires_approval=True,
         )
 
