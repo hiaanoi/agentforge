@@ -855,7 +855,7 @@ class Verified10Campaign:
                     "database_path": ".agentforge/agentforge.db",
                     "model": self._active_model,
                     "max_steps": self._agentforge_max_steps,
-                    "profile_ids": ("compile", "verify"),
+                "profile_ids": ("compile", "default", "verify"),
                 },
             )
             ProductRuntimeDefinitionLoader().load(workspace, config=config)
@@ -891,6 +891,8 @@ class Verified10Campaign:
             "--profile-id",
             "compile",
             "--profile-id",
+            "default",
+            "--profile-id",
             "verify",
         )
 
@@ -905,7 +907,11 @@ class Verified10Campaign:
         self._active_repair_engine = repair_engine
         self._preflight_agentforge(workspace, task)
         common = self._af_common(workspace)
-        for profile, purpose in (("compile", "development"), ("verify", "verification")):
+        for profile, purpose in (
+            ("compile", "development"),
+            ("default", "development"),
+            ("verify", "verification"),
+        ):
             self._run(
                 CampaignCommand(
                     (
