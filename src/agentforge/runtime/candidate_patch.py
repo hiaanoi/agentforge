@@ -7,9 +7,13 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import UUID
 
-from agentforge.domain.enums import ToolErrorCode
+from pydantic import BaseModel, ConfigDict
+
+from agentforge.domain.enums import ToolErrorCode, ToolRisk
 from agentforge.domain.errors import ToolExecutionError
+from agentforge.domain.models import ToolResult, ToolSpec
 from agentforge.domain.mutations import MutationPlan
 from agentforge.tools.mutation.atomic import AtomicMutationWriter, file_sha256
 from agentforge.tools.mutation.security import MutationSecurityPolicy
@@ -56,6 +60,9 @@ class CandidatePatchStore:
         )
         return path
 
+    def path_for(self, run_id: UUID) -> Path:
+        return self._root / str(run_id) / self._FILENAME
+
     def load(self, path: Path) -> CandidatePatch:
         resolved = path.resolve(strict=True)
         try:
@@ -84,6 +91,41 @@ class CandidatePatchStore:
             if hashlib.sha256(entry.data).hexdigest() != entry.plan.expected_after_sha256:
                 raise ValueError("Candidate patch manifest bytes do not match its plan")
         return CandidatePatch(entries=entries)
+
+
+class CandidatePatchPublishArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: UUID
+
+
+class CandidatePatchPublishTool:
+    def __init__(self, publisher: CandidatePatchPublisher, store: CandidatePatchStore) -> None:
+        self._publisher = publisher
+        self._store = store
+
+    @property
+    def input_model(self) -> type[BaseModel]:
+        return CandidatePatchPublishArguments
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="publish_candidate_patch",
+            description="Publish the saved candidate patch after final approval.",
+            input_schema=self.input_model.model_json_schema(),
+            risk_level=ToolRisk.DANGEROUS,
+            requires_approval=True,
+        )
+
+    def execute(self, arguments: BaseModel) -> ToolResult:
+        parsed = CandidatePatchPublishArguments.model_validate(arguments)
+        patch = self._store.load(self._store.path_for(parsed.run_id))
+        self._publisher.publish(patch)
+        return ToolResult(
+            success=True,
+            output={"entries": len(patch.entries), "status": "published"},
+        )
 
 
 class CandidatePatchPublisher:

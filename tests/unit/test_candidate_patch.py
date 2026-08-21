@@ -7,7 +7,11 @@ import pytest
 from agentforge.domain.enums import ToolErrorCode
 from agentforge.domain.errors import ToolExecutionError
 from agentforge.policy.sensitive import SensitiveFilePolicy
-from agentforge.runtime.candidate_patch import CandidatePatchPublisher, CandidatePatchStore
+from agentforge.runtime.candidate_patch import (
+    CandidatePatchPublisher,
+    CandidatePatchPublishTool,
+    CandidatePatchStore,
+)
 from agentforge.tools.mutation.base import MutationLimits
 from agentforge.tools.mutation.security import MutationSecurityPolicy
 from agentforge.tools.paths import WorkspacePathResolver
@@ -70,6 +74,24 @@ def test_saved_candidate_patch_can_be_reopened_and_published_after_restart(tmp_p
 
     assert (canonical / "src" / "module.py").read_text(encoding="utf-8") == "value = 1\n"
     publisher.publish(reopened)
+    assert (canonical / "src" / "module.py").read_text(encoding="utf-8") == "value = 2\n"
+
+
+def test_candidate_patch_publish_tool_reads_saved_manifest_by_run_id(tmp_path: Path) -> None:
+    canonical, candidate, publisher = _candidate_and_publisher(tmp_path)
+    (candidate / "src" / "module.py").write_text("value = 2\n", encoding="utf-8")
+    store = CandidatePatchStore(canonical)
+    store.save("00000000-0000-0000-0000-000000000001", publisher.capture(candidate))
+    tool = CandidatePatchPublishTool(publisher, store)
+
+    arguments = tool.input_model.model_validate(
+        {"run_id": "00000000-0000-0000-0000-000000000001"}
+    )
+    result = tool.execute(arguments)
+
+    assert tool.spec.requires_approval is True
+    assert result.success is True
+    assert result.output == {"entries": 1, "status": "published"}
     assert (canonical / "src" / "module.py").read_text(encoding="utf-8") == "value = 2\n"
 
 

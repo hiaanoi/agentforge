@@ -49,6 +49,11 @@ from agentforge.policy.sensitive import SensitiveFilePolicy
 from agentforge.process.base import ProcessTreeSupervisor
 from agentforge.process.runner import create_process_tree_supervisor
 from agentforge.repair_engines.models import RepairEngineKind
+from agentforge.runtime.candidate_patch import (
+    CandidatePatchPublisher,
+    CandidatePatchPublishTool,
+    CandidatePatchStore,
+)
 from agentforge.runtime.engine import AgentRuntime
 from agentforge.runtime.mutations import MutationCoordinator
 from agentforge.runtime.repair import RepairCoordinator
@@ -263,6 +268,7 @@ class RuntimeComponentFactory:
             resolver,
             request.profiles,
             request.policy,
+            repair_engine=request.repair_engine,
             sensitive=sensitive,
         )
         runs = RunRepository(request.database)
@@ -383,6 +389,7 @@ class RuntimeComponentFactory:
         profiles: TestProfileRegistry,
         policy: ToolAssemblyPolicy,
         *,
+        repair_engine: RepairEngineKind = RepairEngineKind.NATIVE,
         sensitive: SensitiveFilePolicy | None = None,
     ) -> tuple[ToolRegistry, MutationSecurityPolicy]:
         sensitive_policy = sensitive or SensitiveFilePolicy()
@@ -404,6 +411,14 @@ class RuntimeComponentFactory:
         ]
         if policy.allow_file_creation:
             tools.append(WriteFileTool(mutation_security))
+        if repair_engine is RepairEngineKind.MINI_LINEAR:
+            publisher = CandidatePatchPublisher(
+                canonical_root=resolver.workspace,
+                security=mutation_security,
+            )
+            tools.append(
+                CandidatePatchPublishTool(publisher, CandidatePatchStore(resolver.workspace))
+            )
         return ToolRegistry(tools), mutation_security
 
     @staticmethod
