@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agentforge.domain.enums import ToolErrorCode
+from agentforge.domain.enums import ToolCapability, ToolErrorCode
 from agentforge.domain.errors import ToolExecutionError
 from agentforge.policy.sensitive import SensitiveFilePolicy
 from agentforge.runtime.candidate_patch import (
@@ -90,6 +90,7 @@ def test_candidate_patch_publish_tool_reads_saved_manifest_by_run_id(tmp_path: P
     result = tool.execute(arguments)
 
     assert tool.spec.requires_approval is True
+    assert tool.spec.capability is ToolCapability.CANDIDATE_PATCH_PUBLICATION
     assert result.success is True
     assert result.output == {"entries": 1, "status": "published"}
     assert (canonical / "src" / "module.py").read_text(encoding="utf-8") == "value = 2\n"

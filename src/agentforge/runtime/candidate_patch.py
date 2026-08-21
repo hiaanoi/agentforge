@@ -11,7 +11,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from agentforge.domain.enums import ToolErrorCode, ToolRisk
+from agentforge.domain.enums import ToolCapability, ToolErrorCode, ToolRisk
 from agentforge.domain.errors import ToolExecutionError
 from agentforge.domain.models import ToolResult, ToolSpec
 from agentforge.domain.mutations import MutationPlan
@@ -116,6 +116,7 @@ class CandidatePatchPublishTool:
             input_schema=self.input_model.model_json_schema(),
             risk_level=ToolRisk.WRITE,
             requires_approval=True,
+            capability=ToolCapability.CANDIDATE_PATCH_PUBLICATION,
         )
 
     def execute(self, arguments: BaseModel) -> ToolResult:

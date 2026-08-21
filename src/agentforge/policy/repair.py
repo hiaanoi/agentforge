@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel
 
-from agentforge.domain.enums import PolicyOutcome, ToolErrorCode, ToolRisk
+from agentforge.domain.enums import PolicyOutcome, ToolCapability, ToolErrorCode, ToolRisk
 from agentforge.domain.models import Run, ToolSpec
 from agentforge.domain.mutations import MutationPlan
 from agentforge.domain.repair import BudgetKind, RepairCompletionStatus
@@ -54,6 +54,17 @@ class RepairPolicyEnforcer:
                 matched_rule="repair_terminal_state",
                 metadata={"error_type": ToolErrorCode.REPAIR_POLICY_DENIED.value},
             )
+        if spec.capability is ToolCapability.CANDIDATE_PATCH_PUBLICATION:
+            if spec.risk_level is not ToolRisk.WRITE or not spec.requires_approval:
+                return self._deny(
+                    run,
+                    tool_name,
+                    arguments,
+                    "candidate_patch_capability_binding",
+                    severe=True,
+                    authority=authority,
+                )
+            return None
         if spec.risk_level is ToolRisk.READ:
             return (
                 self._budget_denied("repair_read_budget")

@@ -221,6 +221,7 @@ class ToolSource(StrEnum):
 class ToolCapability(StrEnum):
     NONE = "NONE"
     TEST_PROFILE_EXECUTION = "TEST_PROFILE_EXECUTION"
+    CANDIDATE_PATCH_PUBLICATION = "CANDIDATE_PATCH_PUBLICATION"
 
 
 class WriteMode(StrEnum):
