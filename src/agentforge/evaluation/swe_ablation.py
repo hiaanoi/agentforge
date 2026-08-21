@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from agentforge.evaluation.swebench_prediction import (
     SWEbenchPrediction,
@@ -53,6 +53,7 @@ class SWEAblationCampaign(Verified10Campaign):
         recover_running: bool = False,
         retry_failed: bool = False,
         task_ids: tuple[str, ...] | None = None,
+        repair_engine: Literal["native", "mini_linear"] = "native",
     ) -> None:
         if task_ids is not None:
             validate_ablation_task_ids(task_ids)
@@ -60,6 +61,7 @@ class SWEAblationCampaign(Verified10Campaign):
             recover_running=recover_running,
             retry_failed=retry_failed,
             task_ids=SWE_ABLATION_INSTANCE_IDS,
+            repair_engine=repair_engine,
         )
 
     def finalize_ablation_predictions(self) -> Path:
