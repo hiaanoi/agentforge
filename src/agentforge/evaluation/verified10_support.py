@@ -171,9 +171,10 @@ def agentforge_runtime(
 ) -> str:
     python = str(Path(sys.executable).resolve(strict=True)).replace("\\", "/")
     verifier = str(verifier_root.resolve(strict=True)).replace("\\", "/")
-    return f'''repair_engine = "{repair_engine}"
-
-[provider]
+    engine_binding = (
+        "" if repair_engine == "native" else f'repair_engine = "{repair_engine}"\n\n'
+    )
+    return f'''{engine_binding}[provider]
 kind = "deepseek"
 timeout_seconds = 600.0
 temperature = 0.0
