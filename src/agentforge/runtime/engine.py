@@ -706,6 +706,12 @@ class AgentRuntime:
                 elif run.status is not RunStatus.RUNNING:
                     raise ResumeNotAllowedError("Consumed approval Run is not recoverable")
                 run = self._runs.get(run_id)
+                if (
+                    self._repair_engine is RepairEngineKind.MINI_LINEAR
+                    and snapshot.pending_tool_call is not None
+                    and snapshot.pending_tool_call.tool == "publish_candidate_patch"
+                ):
+                    return self._complete_mini_linear_publish(ownership, run)
                 if self._repairs is not None:
                     repair_state = self._repairs.state(run_id)
                     if repair_state.terminal:
