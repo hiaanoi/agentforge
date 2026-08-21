@@ -56,7 +56,9 @@ async def test_mini_linear_engine_appends_shell_observation_before_next_turn() -
 
     assert result.submitted
     assert shell.commands == ["cat src/module.py"]
-    assert "VALUE = 1" in model.requests[1].history[-1]["content"]
+    observation = model.requests[1].history[-1]
+    assert observation["kind"] == "TOOL_RESULT"
+    assert "VALUE = 1" in observation["payload"]
 
 
 @pytest.mark.asyncio
@@ -68,11 +70,12 @@ async def test_mini_linear_engine_uses_swe_task_prompt_contract() -> None:
         run_id=uuid4(), task="repair module", max_steps=2
     )
 
-    system = model.requests[0].history[0]["content"]
-    task = model.requests[0].history[1]["content"]
+    system = model.requests[0].instructions
+    task = model.requests[0].task
     assert isinstance(system, str) and "interact with a computer shell" in system
-    assert isinstance(task, str) and "<pr_description>" in task
+    assert "<pr_description>" in task
     assert "DO NOT MODIFY: Tests" in task
+    assert model.requests[0].history == []
 
 
 @pytest.mark.asyncio

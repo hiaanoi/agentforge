@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Protocol
 from uuid import UUID
 
+from pydantic import JsonValue
+
 from agentforge.domain.enums import ToolRisk
 from agentforge.domain.models import ToolSpec
 from agentforge.models.base import FinalAnswer, ModelProvider, ModelRequest, parse_model_output
@@ -87,7 +89,7 @@ class SubprocessCandidateShell:
 @dataclass(frozen=True, slots=True)
 class MiniLinearResult:
     submitted: bool
-    history: list[dict[str, object]]
+    history: list[JsonValue]
     model_calls: int
 
 
@@ -110,20 +112,16 @@ class MiniLinearRepairEngine:
         self._shell = shell
 
     async def run(self, *, run_id: UUID, task: str, max_steps: int) -> MiniLinearResult:
-        history: list[dict[str, object]] = [
-            {
-                "role": "system",
-                "content": _MINI_SYSTEM_PROMPT,
-            },
-            {"role": "user", "content": _mini_task_prompt(task)},
-        ]
+        task_prompt = _mini_task_prompt(task)
+        history: list[JsonValue] = []
         for step in range(1, max_steps + 1):
             response = await self._model.generate(
                 ModelRequest(
                     run_id=run_id,
-                    task=task,
+                    task=task_prompt,
                     step_number=step,
-                    history=history,  # type: ignore[arg-type]
+                    instructions=_MINI_SYSTEM_PROMPT,
+                    history=history,
                     tools=[_BASH_TOOL],
                 )
             )
@@ -139,13 +137,23 @@ class MiniLinearRepairEngine:
             command = action.arguments.get("command")
             if not isinstance(command, str) or not command.strip():
                 raise ValueError("Bash action requires a non-empty command")
+            call_id = action.call_id or f"mini-bash-{step}"
             history.append(
                 {
-                    "role": "assistant",
-                    "content": action.reason or "",
-                    "tool_call": {"name": "bash", "arguments": {"command": command}},
+                    "kind": "TOOL_CALL",
+                    "payload": {
+                        "tool": "bash",
+                        "arguments": {"command": command},
+                    },
+                    "call_id": call_id,
                 }
             )
             output = await self._shell.execute(command)
-            history.append({"role": "tool", "tool_name": "bash", "content": output})
+            history.append(
+                {
+                    "kind": "TOOL_RESULT",
+                    "payload": output,
+                    "call_id": call_id,
+                }
+            )
         return MiniLinearResult(submitted=False, history=history, model_calls=max_steps)
