@@ -20,6 +20,38 @@ class CandidateShell(Protocol):
 
 CandidateShellRunner = Callable[..., subprocess.CompletedProcess[str]]
 
+_MINI_SYSTEM_PROMPT = (
+    "You are a helpful assistant that can interact with a computer shell to solve "
+    "programming tasks."
+)
+
+
+def _mini_task_prompt(task: str) -> str:
+    return f"""<pr_description>
+Consider the following PR description:
+{task}
+</pr_description>
+
+<instructions>
+You are a software engineer interacting continuously with a computer by submitting
+commands. Work in the candidate workspace and make a general, minimal source fix.
+
+For each response, include a short THOUGHT section and exactly one bash tool call.
+Run commands, inspect their results, and use the next response to continue the repair.
+
+Important boundaries:
+- Modify regular source files needed for the fix.
+- DO NOT MODIFY: Tests, configuration files, or build metadata.
+- Do not fabricate command output or claim completion without verification.
+
+Recommended workflow:
+1. Inspect the relevant source and tests.
+2. Reproduce or understand the reported behavior.
+3. Edit the source files with a shell command.
+4. Run the narrowest useful verification.
+5. When the fix is ready and verified, return a final answer to submit the candidate.
+</instructions>"""
+
 
 class SubprocessCandidateShell:
     def __init__(
@@ -81,9 +113,9 @@ class MiniLinearRepairEngine:
         history: list[dict[str, object]] = [
             {
                 "role": "system",
-                "content": "Use the bash tool to inspect, edit, and test the candidate workspace.",
+                "content": _MINI_SYSTEM_PROMPT,
             },
-            {"role": "user", "content": task},
+            {"role": "user", "content": _mini_task_prompt(task)},
         ]
         for step in range(1, max_steps + 1):
             response = await self._model.generate(

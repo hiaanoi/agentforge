@@ -60,6 +60,22 @@ async def test_mini_linear_engine_appends_shell_observation_before_next_turn() -
 
 
 @pytest.mark.asyncio
+async def test_mini_linear_engine_uses_swe_task_prompt_contract() -> None:
+    from agentforge.repair_engines.mini_linear import MiniLinearRepairEngine
+
+    model = _Model()
+    await MiniLinearRepairEngine(model, _Shell()).run(
+        run_id=uuid4(), task="repair module", max_steps=2
+    )
+
+    system = model.requests[0].history[0]["content"]
+    task = model.requests[0].history[1]["content"]
+    assert isinstance(system, str) and "interact with a computer shell" in system
+    assert isinstance(task, str) and "<pr_description>" in task
+    assert "DO NOT MODIFY: Tests" in task
+
+
+@pytest.mark.asyncio
 async def test_candidate_shell_runs_bash_in_candidate_root(tmp_path: Path) -> None:
     from agentforge.repair_engines.mini_linear import SubprocessCandidateShell
 
