@@ -420,7 +420,8 @@ class CampaignState(_FrozenModel):
     schema_version: Literal[2] = 2
     protocol_digest: str = Field(pattern=SHA256_PATTERN)
     prepared: bool = False
-    admission_count: int = Field(default=0, ge=0, le=10)
+    admission_count: int = Field(default=0, ge=0, le=500)
+    task_ids: tuple[str, ...] = ()
     public_tasks: dict[str, str] = Field(default_factory=dict)
     workspaces: dict[str, WorkspaceRecord] = Field(default_factory=dict)
     attempts: dict[str, tuple[CampaignAttempt, ...]] = Field(default_factory=dict)
@@ -443,17 +444,19 @@ class CampaignState(_FrozenModel):
 
     @model_validator(mode="after")
     def validate_topology(self) -> Self:
-        expected = set(EXPECTED_INSTANCE_IDS)
+        expected = set(self.task_ids or EXPECTED_INSTANCE_IDS)
+        if len(expected) > 500:
+            raise ValueError("campaign contains too many tasks")
         workspace_keys = {
             f"{arm.value}:{instance_id}"
             for arm in BenchmarkArm
-            for instance_id in EXPECTED_INSTANCE_IDS
+            for instance_id in expected
         }
         if self.prepared:
-            if self.admission_count != 10 or set(self.public_tasks) != expected:
-                raise ValueError("prepared campaign requires exactly ten public tasks")
+            if self.admission_count != len(expected) or set(self.public_tasks) != expected:
+                raise ValueError("prepared campaign admission does not match task set")
             if set(self.workspaces) != workspace_keys:
-                raise ValueError("prepared campaign requires twenty bound workspaces")
+                raise ValueError("prepared campaign workspaces do not match task set")
         elif self.admission_count or self.public_tasks or self.workspaces:
             raise ValueError("unprepared campaign cannot contain admitted workspaces")
         if set(self.attempts) - {arm.value for arm in BenchmarkArm}:
@@ -470,7 +473,7 @@ class CampaignState(_FrozenModel):
 
 
 def swebench_image_name(instance_id: str) -> str:
-    if instance_id not in EXPECTED_INSTANCE_IDS:
+    if not instance_id or "__" not in instance_id:
         raise CampaignExecutionError("Invalid SWE-bench instance identifier")
     mapped = instance_id.replace("__", "_1776_").lower()
     return f"docker.io/swebench/sweb.eval.x86_64.{mapped}:latest"

@@ -132,7 +132,10 @@ class Verified10Campaign:
             descriptor = self._acquire_lock()
             try:
                 self._atomic(self.root / "protocol.json", self.protocol_path.read_bytes())
-                state = CampaignState(protocol_digest=self.protocol.protocol_digest)
+                state = CampaignState(
+                    protocol_digest=self.protocol.protocol_digest,
+                    task_ids=tuple(task.instance_id for task in self.protocol.tasks),
+                )
                 self._write_state_unlocked(state)
                 return state
             finally:

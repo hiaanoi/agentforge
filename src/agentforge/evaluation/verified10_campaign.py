@@ -277,9 +277,7 @@ class Prior14CallBaseline(_FrozenModel):
 
 class Verified10Protocol(_FrozenModel):
     schema_version: Literal[1]
-    protocol_name: Literal[
-        "verified10-deepseek-flash-pass1", "verified10-deepseek-flash-pass2"
-    ]
+    protocol_name: str = Field(min_length=1, max_length=200)
     dataset_name: Literal["princeton-nlp/SWE-bench_Verified"]
     dataset_split: Literal["test"]
     dataset_fingerprint: str = Field(min_length=1, max_length=200)
@@ -288,8 +286,8 @@ class Verified10Protocol(_FrozenModel):
     mini_swe_agent_commit: Literal["25941c89cfbc91eb40b3f8756348c91d9977d57e"]
     mini_swe_agent_version: Literal["2.4.6"]
     attempts_per_instance: Literal[1]
-    model: Literal["deepseek-v4-flash"]
-    thinking_enabled: Literal[False]
+    model: str = Field(min_length=1, max_length=200)
+    thinking_enabled: bool
     temperature: float
     tasks: tuple[Verified10Task, ...]
     generation_forbidden_fields: tuple[str, ...]
@@ -335,12 +333,23 @@ class Verified10Protocol(_FrozenModel):
             )
             for task in self.tasks
         )
-        if actual_bindings != _FROZEN_TASK_BINDINGS:
-            raise ValueError("tasks do not match the frozen old selection bindings")
-        if self.dataset_fingerprint != _FROZEN_DATASET_FINGERPRINT:
-            raise ValueError("dataset_fingerprint does not match the frozen selection")
-        if self.source_selection_sha256 != _FROZEN_SOURCE_SELECTION_SHA256:
-            raise ValueError("source_selection_sha256 does not match the frozen selection")
+        if self.protocol_name in {
+            "verified10-deepseek-flash-pass1",
+            "verified10-deepseek-flash-pass2",
+        }:
+            if actual_bindings != _FROZEN_TASK_BINDINGS:
+                raise ValueError("tasks do not match the frozen old selection bindings")
+            if self.dataset_fingerprint != _FROZEN_DATASET_FINGERPRINT:
+                raise ValueError("dataset_fingerprint does not match the frozen selection")
+            if self.source_selection_sha256 != _FROZEN_SOURCE_SELECTION_SHA256:
+                raise ValueError("source_selection_sha256 does not match the frozen selection")
+        else:
+            if self.protocol_name != "verified50-openai-gpt54mini" or len(self.tasks) != 50:
+                raise ValueError("unsupported evaluation protocol")
+            if len({task.instance_id for task in self.tasks}) != len(self.tasks):
+                raise ValueError("protocol tasks must be unique")
+            if len({task.selection_rank for task in self.tasks}) != len(self.tasks):
+                raise ValueError("protocol selection ranks must be unique")
         expected_budgets = {
             "verified10-deepseek-flash-pass1": (
                 ("SWE_BENCH_PASS1", 50, 80, 1800, 52),
@@ -351,7 +360,10 @@ class Verified10Protocol(_FrozenModel):
                 (100, 3600),
             ),
         }
-        agentforge_expected, mini_expected = expected_budgets[self.protocol_name]
+        agentforge_expected, mini_expected = expected_budgets.get(
+            self.protocol_name,
+            (("SWE_BENCH_PASS2", 100, 100, 3600, 102), (100, 3600)),
+        )
         if (
             self.agentforge_budget.repair_profile,
             self.agentforge_budget.logical_model_calls,
@@ -525,12 +537,12 @@ def finalize_verified10_campaign(
         )
     except (AttributeError, TypeError, ValueError, ValidationError):
         raise CampaignArtifactError("Campaign artifact failed validation") from None
-    if len(protocol.tasks) != 10:
-        raise CampaignArtifactError("Campaign protocol must contain exactly ten tasks")
+    if not protocol.tasks:
+        raise CampaignArtifactError("Campaign protocol must contain at least one task")
     expected_ids = tuple(task.instance_id for task in protocol.tasks)
     if len(attempts) != len(expected_ids) or len(predictions) != len(expected_ids):
         raise CampaignArtifactError(
-            "Campaign finalizer requires exactly ten attempts and predictions"
+            "Campaign finalizer requires one attempt and prediction per protocol task"
         )
     if any(record.protocol_sha256 != protocol.protocol_sha256 for record in attempts):
         raise CampaignArtifactError("Campaign attempt protocol digest mismatch")
@@ -775,7 +787,7 @@ def validate_public_dataset_rows(
     """Validate public runtime rows against the frozen selection and task hashes."""
 
     if len(rows) != len(protocol.tasks):
-        raise ValueError("runtime dataset must contain exactly ten rows")
+        raise ValueError("runtime dataset must contain one row per protocol task")
     projected_rows: list[dict[str, str]] = []
     for row, task in zip(rows, protocol.tasks, strict=True):
         projected_rows.append(validate_public_task(row, task))
