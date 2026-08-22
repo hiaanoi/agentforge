@@ -407,7 +407,12 @@ class Verified10Campaign:
         )
 
     def _require_prepared(self, state: CampaignState) -> None:
-        if not state.prepared or state.admission_count != 10 or len(state.workspaces) != 20:
+        expected = len(self.protocol.tasks)
+        if (
+            not state.prepared
+            or state.admission_count != expected
+            or len(state.workspaces) != expected * len(BenchmarkArm)
+        ):
             raise CampaignExecutionError("Campaign is not admitted; run prepare successfully first")
 
     def _validate_prepared_bindings(self, state: CampaignState, arm: BenchmarkArm) -> None:
