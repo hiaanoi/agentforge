@@ -317,11 +317,7 @@ class Verified10Campaign:
         bindings: dict[str, DockerImageBinding] = {}
         for task in self.protocol.tasks:
             tag = swebench_image_name(task.instance_id)
-            self._run(
-                CampaignCommand(("docker", "pull", tag), timeout_seconds=1800),
-                label="docker pull",
-            )
-            bindings[task.instance_id] = self._inspect_image(tag, pull_if_missing=False)
+            bindings[task.instance_id] = self._inspect_image(tag, pull_if_missing=True)
         for arm in BenchmarkArm:
             for task in self.protocol.tasks:
                 binding = bindings[task.instance_id]
@@ -384,7 +380,7 @@ class Verified10Campaign:
             return current.model_copy(
                 update={
                     "prepared": True,
-                    "admission_count": 10,
+                    "admission_count": len(self.protocol.tasks),
                     "public_tasks": statements,
                     "workspaces": records,
                 }
@@ -1328,7 +1324,12 @@ class Verified10Campaign:
                 counts[record.status.value.lower()] += 1
                 if record.telemetry_unavailable:
                     counts["telemetry_unavailable"] += 1
-            counts["planned"] = 10 - counts["running"] - counts["completed"] - counts["failed"]
+            counts["planned"] = (
+                len(self.protocol.tasks)
+                - counts["running"]
+                - counts["completed"]
+                - counts["failed"]
+            )
             result[arm.value] = counts
         return result
 
@@ -1336,7 +1337,7 @@ class Verified10Campaign:
         state = self._load()
         self._require_prepared(state)
         return {
-            "agentforge_admission": f"{state.admission_count}/10",
+            "agentforge_admission": f"{state.admission_count}/{len(self.protocol.tasks)}",
             "safe_symlink_rejections": "0",
             "protocol_sha256": self.protocol.protocol_sha256,
         }
