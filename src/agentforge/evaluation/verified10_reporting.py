@@ -171,9 +171,13 @@ class Verified10Reporting:
         prediction_digest_before = _sha256_file(prediction_path)
         ledger_digest_before = _sha256_file(ledger_path)
         score_root = self.root / "official" / arm.value.lower()
+        existing_reports = tuple(score_root.glob("*.json")) if score_root.is_dir() else ()
+        reuse_existing = (score_root / "harness.log").is_file() and len(existing_reports) == 1
         if score_root.exists() or score_root.is_symlink():
-            raise ReportingError("Official score for arm already exists")
-        score_root.mkdir(parents=True)
+            if not reuse_existing:
+                raise ReportingError("Official score for arm already exists")
+        else:
+            score_root.mkdir(parents=True)
         run_id = f"verified10-{self.protocol.protocol_sha256[:16]}-{arm.value.lower()}"
         harness_dataset = self.root / "harness-dataset.json"
         dataset_name = (
@@ -211,17 +215,20 @@ class Verified10Reporting:
             cwd=harness,
             timeout_seconds=10 * 1800,
         )
-        try:
-            result = self.runner.run(command)
-        except (OSError, subprocess.SubprocessError):
-            raise ReportingError("Official SWE-bench harness could not run") from None
         log_path = score_root / "harness.log"
-        log_bytes = (result.stdout + result.stderr).encode("utf-8", errors="replace")
-        _atomic_new(log_path, log_bytes)
-        if result.returncode != 0:
-            raise ReportingError("Official SWE-bench harness failed")
         model_name = predictions[0]["model_name_or_path"].replace("/", "__")
-        report_path = score_root / f"{model_name}.{run_id}.json"
+        if reuse_existing:
+            report_path = existing_reports[0]
+        else:
+            try:
+                result = self.runner.run(command)
+            except (OSError, subprocess.SubprocessError):
+                raise ReportingError("Official SWE-bench harness could not run") from None
+            log_bytes = (result.stdout + result.stderr).encode("utf-8", errors="replace")
+            _atomic_new(log_path, log_bytes)
+            if result.returncode != 0:
+                raise ReportingError("Official SWE-bench harness failed")
+            report_path = score_root / f"{model_name}.{run_id}.json"
         official = _load_official_report(report_path, self.protocol)
         prediction_digest = _sha256_file(prediction_path)
         ledger_digest = _sha256_file(ledger_path)
