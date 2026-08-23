@@ -194,7 +194,7 @@ class Verified10Reporting:
                 "--predictions_path",
                 str(prediction_path),
                 "--max_workers",
-                "1",
+                "4",
                 "--timeout",
                 "1800",
                 "--run_id",
