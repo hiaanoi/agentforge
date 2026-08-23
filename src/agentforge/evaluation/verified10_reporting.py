@@ -104,7 +104,7 @@ class OfficialInstanceResult(_FrozenModel):
 class OfficialReport(_FrozenModel):
     raw: dict[str, object]
     instances: tuple[OfficialInstanceResult, ...]
-    resolved_instances: int = Field(ge=0, le=10)
+    resolved_instances: int = Field(ge=0, le=500)
 
 
 class ScoreMetadata(_FrozenModel):
@@ -262,7 +262,7 @@ class Verified10Reporting:
         if any(path.exists() or path.is_symlink() for path in targets):
             raise ReportingError("Verified-10 comparison already exists")
         state = self._load_state()
-        if state.admission_count != 10 or set(state.finalized_arms) != {
+        if state.admission_count != len(self.protocol.tasks) or set(state.finalized_arms) != {
             arm.value for arm in BenchmarkArm
         }:
             raise ReportingError("Campaign is not fully admitted and finalized")
@@ -279,6 +279,7 @@ class Verified10Reporting:
             state.admission_count,
             agentforge_resolved,
             mini_resolved,
+            expected_admission=len(self.protocol.tasks),
         )
         instances: list[dict[str, object]] = []
         for task in self.protocol.tasks:
@@ -373,7 +374,7 @@ class Verified10Reporting:
             raise ReportingError("Campaign attempt ledger is invalid") from None
         expected = tuple(task.instance_id for task in self.protocol.tasks)
         if (
-            len(attempts) != 10
+            len(attempts) != len(expected)
             or tuple(record.instance_id for record in attempts) != expected
             or any(
                 record.arm is not arm
@@ -445,6 +446,7 @@ class Verified10Reporting:
             "harness_log_sha256": metadata.log_sha256,
             "evidence_gates": {
                 "admission_10_of_10": admission == 10,
+                "admission_all_tasks": admission == len(self.protocol.tasks),
                 "non_empty_patches_gt_0": non_empty > 0,
                 "resolved_gt_0": resolved > 0,
             },
@@ -492,8 +494,14 @@ class Verified10Reporting:
         ]
 
 
-def choose_decision(admission: int, agentforge_resolved: int, mini_resolved: int) -> str:
-    if admission != 10:
+def choose_decision(
+    admission: int,
+    agentforge_resolved: int,
+    mini_resolved: int,
+    *,
+    expected_admission: int = 10,
+) -> str:
+    if admission != expected_admission:
         return "COMPATIBILITY_INCOMPLETE"
     if mini_resolved > agentforge_resolved and agentforge_resolved <= 1:
         return "DESIGN_REPAIR_ENGINE_MIGRATION"
@@ -513,7 +521,7 @@ def _load_predictions(
     expected_model = (
         "agentforge:" if arm is BenchmarkArm.AGENTFORGE else "mini-swe-agent:"
     ) + protocol.model
-    if not isinstance(decoded, list) or len(decoded) != 10:
+    if not isinstance(decoded, list) or len(decoded) != len(expected_ids):
         raise ReportingError("Official predictions denominator must contain ten records")
     rows: list[dict[str, str]] = []
     for expected_id, value in zip(expected_ids, decoded, strict=True):
@@ -570,10 +578,10 @@ def _load_official_report(path: Path, protocol: Verified10Protocol) -> OfficialR
                     "error_instances",
                 )
             )
-            or raw["total_instances"] != 10
-            or raw["submitted_instances"] != 10
+            or raw["total_instances"] != len(expected)
+            or raw["submitted_instances"] != len(expected)
             or set(raw["submitted_ids"]) != expected_set
-            or len(raw["submitted_ids"]) != 10
+            or len(raw["submitted_ids"]) != len(expected)
         ):
             raise ValueError
         for classification, field in fields.items():
