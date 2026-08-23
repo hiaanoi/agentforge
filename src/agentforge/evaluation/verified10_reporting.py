@@ -175,6 +175,8 @@ class Verified10Reporting:
             raise ReportingError("Official score for arm already exists")
         score_root.mkdir(parents=True)
         run_id = f"verified10-{self.protocol.protocol_sha256[:16]}-{arm.value.lower()}"
+        harness_dataset = self.root / "harness-dataset.json"
+        dataset_name = str(harness_dataset) if harness_dataset.is_file() else self.protocol.dataset_name
         command = CampaignCommand(
             (
                 "uv",
@@ -186,7 +188,7 @@ class Verified10Reporting:
                 "-m",
                 "swebench.harness.run_evaluation",
                 "--dataset_name",
-                self.protocol.dataset_name,
+                dataset_name,
                 "--split",
                 self.protocol.dataset_split,
                 "--instance_ids",
