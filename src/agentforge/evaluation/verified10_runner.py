@@ -635,9 +635,13 @@ class Verified10Campaign:
         workspace_record: WorkspaceRecord,
         started: float,
     ) -> CampaignAttempt:
-        secret = os.environ.get("DEEPSEEK_API_KEY")
+        secret = os.environ.get("OPENAI_API_KEY") or os.environ.get("DEEPSEEK_API_KEY")
         if not secret:
             raise CampaignExecutionError("Mini model credential is unavailable")
+        mini_model = f"openai/{self.protocol.model}"
+        mini_api_base = os.environ.get(
+            "OPENAI_BASE_URL", "https://api.deepseek.com/v1"
+        )
         output = self.root / "mini-output" / task.instance_id
         output.mkdir(parents=True, exist_ok=True)
         config = self.root / "configs" / "mini" / f"{task.instance_id}.yaml"
@@ -646,6 +650,8 @@ class Verified10Campaign:
             self._mini_config(
                 step_limit=self.protocol.mini_budget.step_limit,
                 wall_time_seconds=self.protocol.mini_budget.wall_time_seconds,
+                model_name=mini_model,
+                api_base=mini_api_base,
             ).encode(),
         )
         builtin = mini_root / "src" / "minisweagent" / "config" / "benchmarks" / "swebench.yaml"
@@ -673,7 +679,7 @@ class Verified10Campaign:
                 "--workers",
                 "1",
                 "--model",
-                "openai/deepseek-v4-flash",
+                mini_model,
                 "--config",
                 str(builtin),
                 "--config",
@@ -724,7 +730,7 @@ class Verified10Campaign:
             patch = item["model_patch"]
             if (
                 not isinstance(patch, str)
-                or item.get("model_name_or_path") != "openai/deepseek-v4-flash"
+                or item.get("model_name_or_path") != f"openai/{self.protocol.model}"
             ):
                 raise ValueError("prediction model identity is invalid")
         except FileNotFoundError:

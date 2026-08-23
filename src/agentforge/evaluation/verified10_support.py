@@ -145,13 +145,19 @@ def agentforge_config() -> str:
     )
 
 
-def mini_config(*, step_limit: int = 50, wall_time_seconds: int = 1800) -> str:
+def mini_config(
+    *,
+    step_limit: int = 50,
+    wall_time_seconds: int = 1800,
+    model_name: str = "openai/deepseek-v4-flash",
+    api_base: str = "https://api.deepseek.com/v1",
+) -> str:
     return (
         f"agent:\n  step_limit: {step_limit}\n  cost_limit: 0.0\n"
         f"  wall_time_limit_seconds: {wall_time_seconds}\n  max_consecutive_format_errors: 3\n"
-        "model:\n  model_name: openai/deepseek-v4-flash\n  model_kwargs:\n"
+        f"model:\n  model_name: {model_name}\n  model_kwargs:\n"
         "    drop_params: true\n    parallel_tool_calls: false\n"
-        "    api_base: https://api.deepseek.com/v1\n    temperature: 0\n"
+        f"    api_base: {api_base}\n    temperature: 0\n"
         "    extra_body:\n      thinking:\n        type: disabled\n"
         "  cost_tracking: ignore_errors\n"
         "environment:\n  cwd: /testbed\n  timeout: 120\n"
