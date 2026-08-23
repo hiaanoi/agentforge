@@ -176,7 +176,11 @@ class Verified10Reporting:
         score_root.mkdir(parents=True)
         run_id = f"verified10-{self.protocol.protocol_sha256[:16]}-{arm.value.lower()}"
         harness_dataset = self.root / "harness-dataset.json"
-        dataset_name = str(harness_dataset) if harness_dataset.is_file() else self.protocol.dataset_name
+        dataset_name = (
+            str(harness_dataset)
+            if harness_dataset.is_file()
+            else self.protocol.dataset_name
+        )
         command = CampaignCommand(
             (
                 "uv",
