@@ -590,6 +590,7 @@ def _load_official_report(path: Path, protocol: Verified10Protocol) -> OfficialR
             or len(raw["submitted_ids"]) != len(expected)
         ):
             raise ValueError
+        sets: dict[str, set[str]] = {}
         for classification, field in fields.items():
             values = raw[field]
             if not isinstance(values, list) or any(type(value) is not str for value in values):
@@ -605,18 +606,29 @@ def _load_official_report(path: Path, protocol: Verified10Protocol) -> OfficialR
             }[classification]
             if count_name is not None and raw[count_name] != len(values):
                 raise ValueError
-            for instance_id in values:
-                if instance_id not in expected_set or instance_id in classified:
-                    raise ValueError
-                classified[instance_id] = classification
+            if len(set(values)) != len(values) or not set(values) <= expected_set:
+                raise ValueError
+            sets[classification] = set(values)
+        # SWE-bench uses ambiguous/empty-patch lists as refinements of
+        # unresolved/completed, so those raw lists intentionally overlap.
+        precedence = (
+            "RESOLVED",
+            "INFRA_FAILURE",
+            "ERROR",
+            "AMBIGUOUS_FAILURE",
+            "EMPTY_PATCH",
+            "UNRESOLVED",
+            "INCOMPLETE",
+        )
+        for instance_id in expected:
+            for classification in precedence:
+                if instance_id in sets[classification]:
+                    classified[instance_id] = classification
+                    break
         if set(classified) != expected_set:
             raise ValueError
         completed = set(raw["completed_ids"])
-        if completed != {
-            instance_id
-            for instance_id, classification in classified.items()
-            if classification in {"RESOLVED", "UNRESOLVED"}
-        }:
+        if completed != sets["RESOLVED"] | sets["UNRESOLVED"]:
             raise ValueError
         if raw["completed_instances"] != len(completed):
             raise ValueError
