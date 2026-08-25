@@ -323,6 +323,11 @@ class RuntimeComponentFactory:
                 CandidatePatchPublisher(
                     canonical_root=resolver.workspace,
                     security=mutation_security,
+                    excluded_path_prefixes=(
+                        (".agentforge",)
+                        if request.repair_engine is RepairEngineKind.MINI_NATIVE
+                        else ()
+                    ),
                 )
                 if request.repair_engine in {
                     RepairEngineKind.MINI_LINEAR,
@@ -439,6 +444,11 @@ class RuntimeComponentFactory:
             publisher = CandidatePatchPublisher(
                 canonical_root=resolver.workspace,
                 security=mutation_security,
+                excluded_path_prefixes=(
+                    (".agentforge",)
+                    if repair_engine is RepairEngineKind.MINI_NATIVE
+                    else ()
+                ),
             )
             tools.append(
                 CandidatePatchPublishTool(publisher, CandidatePatchStore(resolver.workspace))

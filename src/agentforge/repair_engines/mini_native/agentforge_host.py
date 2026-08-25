@@ -5,7 +5,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import JsonValue
 
@@ -15,6 +15,7 @@ from agentforge.domain.models import ApprovalRequired, Run, ToolResult
 from agentforge.models.base import ModelProvider, ModelRequest, ToolCall
 from agentforge.models.domain import ModelResponse
 from agentforge.models.executor import ModelExecutor
+from agentforge.persistence.model_workflow import ModelWorkflow
 from agentforge.persistence.repositories import CheckpointRepository, EventRepository, RunRepository
 from agentforge.repair_engines.mini_native.contracts import (
     CandidatePatchResult,
@@ -71,6 +72,14 @@ class AgentForgeMiniNativeHost:
         self._run.current_step += 1
         self._runs.save(self._run, authority=self._ownership.authority)
         bound_request = request.model_copy(update={"step_number": self._run.current_step})
+        model_call_id = uuid4()
+        request_digest = ModelWorkflow.request_digest(bound_request)
+        audit_payload: dict[str, JsonValue] = {
+            "step_number": self._run.current_step,
+            "model_call_id": str(model_call_id),
+            "request_digest": request_digest,
+        }
+        self._append_event(EventType.MODEL_REQUESTED, audit_payload)
         if self._model_executor is not None:
             response = await self._model_executor.generate(
                 self._run, bound_request, ownership=self._ownership
@@ -79,7 +88,16 @@ class AgentForgeMiniNativeHost:
             response = await self._provider.generate(bound_request)
         self._append_event(
             EventType.MODEL_RESPONDED,
-            {"step_number": self._run.current_step, "response_type": response.action.type},
+            {
+                **audit_payload,
+                "response_type": response.action.type,
+                "provider": response.provider,
+                "model": response.model,
+                "usage": (
+                    response.usage.model_dump(mode="json") if response.usage is not None else None
+                ),
+                "provider_metadata": response.sanitized_metadata,
+            },
         )
         return response
 

@@ -137,11 +137,26 @@ class CandidatePatchPublisher:
     workspace.
     """
 
-    def __init__(self, *, canonical_root: Path, security: MutationSecurityPolicy) -> None:
+    def __init__(
+        self,
+        *,
+        canonical_root: Path,
+        security: MutationSecurityPolicy,
+        excluded_path_prefixes: tuple[str, ...] = (),
+    ) -> None:
         self._canonical_root = canonical_root.resolve(strict=True)
         self._security = security
         if self._security.resolver.workspace != self._canonical_root:
             raise ValueError("Patch security policy must belong to the canonical workspace")
+        if any(
+            not prefix
+            or prefix.startswith("/")
+            or "\\" in prefix
+            or any(part in {"", ".", ".."} for part in prefix.split("/"))
+            for prefix in excluded_path_prefixes
+        ):
+            raise ValueError("Excluded candidate path prefixes must be canonical relative paths")
+        self._excluded_path_prefixes = excluded_path_prefixes
         self._writer = AtomicMutationWriter()
 
     def capture(self, candidate_root: Path) -> CandidatePatch:
@@ -150,6 +165,8 @@ class CandidatePatchPublisher:
         candidate_resolver = WorkspacePathResolver(candidate)
         entries: list[CandidatePatchEntry] = []
         for relative_path in changed_paths:
+            if self._is_excluded(relative_path):
+                continue
             candidate_target = candidate_resolver.resolve_mutation_target(relative_path)
             if not candidate_target.is_file():
                 raise ToolExecutionError(
@@ -183,6 +200,12 @@ class CandidatePatchPublisher:
                 )
             )
         return CandidatePatch(entries=tuple(entries))
+
+    def _is_excluded(self, relative_path: str) -> bool:
+        return any(
+            relative_path == prefix or relative_path.startswith(f"{prefix}/")
+            for prefix in self._excluded_path_prefixes
+        )
 
     def publish(self, patch: CandidatePatch) -> None:
         for entry in patch.entries:

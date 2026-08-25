@@ -81,7 +81,6 @@ def _request(tmp_path: Path) -> tuple[RuntimeAssemblyRequest, Path]:
         "from src.value import VALUE\n\ndef test_value():\n    assert VALUE == 2\n",
         encoding="utf-8",
     )
-    (workspace / ".gitignore").write_text(".agentforge/\n", encoding="utf-8")
     for args in (
         ("init", "-q"),
         ("config", "user.email", "test@example.invalid"),
@@ -92,6 +91,9 @@ def _request(tmp_path: Path) -> tuple[RuntimeAssemblyRequest, Path]:
         subprocess.run(("git", *args), cwd=workspace, check=True, capture_output=True)
     database = Database.from_path(workspace / ".agentforge" / "agentforge.sqlite3")
     database.create_schema()
+    (workspace / ".agentforge" / "runtime-config.json").write_text(
+        '{"private":true}\n', encoding="utf-8"
+    )
     profiles = ProfileRegistry(WorkspacePathResolver(workspace))
     profiles.register(
         ProfileDefinition(
@@ -238,14 +240,39 @@ async def test_mini_native_routes_read_write_test_and_publish_through_runtime(
     assert len(components.mutation_coordinator.list_executions(run.run_id)) == 2
     events = request.events.list_for_run(run.run_id)
     assert {
+        EventType.MODEL_REQUESTED,
+        EventType.MODEL_RESPONDED,
         EventType.TOOL_REQUESTED,
         EventType.MUTATION_COMMITTED,
         EventType.TEST_FAILED,
         EventType.TEST_COMPLETED,
     }.issubset({event.event_type for event in events})
+    model_requested = [
+        event for event in events if event.event_type is EventType.MODEL_REQUESTED
+    ]
+    model_responded = [
+        event for event in events if event.event_type is EventType.MODEL_RESPONDED
+    ]
+    model_dispatching = [
+        event for event in events if event.event_type is EventType.MODEL_ATTEMPT_DISPATCHING
+    ]
+    assert len(model_requested) == len(model_dispatching) == len(model_responded) == 6
     assert all(
-        ".agentforge" not in entry.target_path
-        for entry in components.runtime._candidate_store.load(
-            components.runtime._candidate_store.path_for(run.run_id)
-        ).entries
+        requested.sequence_number < dispatching.sequence_number < responded.sequence_number
+        for requested, dispatching, responded in zip(
+            model_requested, model_dispatching, model_responded, strict=True
+        )
     )
+    assert [event.payload["model_call_id"] for event in model_requested] == [
+        event.payload["model_call_id"] for event in model_responded
+    ]
+    assert all(
+        isinstance(event.payload["request_digest"], str)
+        and len(event.payload["request_digest"]) == 64
+        and "repair" not in event.model_dump_json()
+        for event in (*model_requested, *model_responded)
+    )
+    candidate = components.runtime._candidate_store.load(
+        components.runtime._candidate_store.path_for(run.run_id)
+    )
+    assert [entry.target_path for entry in candidate.entries] == ["src/value.py"]
