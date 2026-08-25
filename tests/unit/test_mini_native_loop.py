@@ -139,6 +139,25 @@ async def test_mini_native_loop_requires_a_new_passing_test_after_a_write() -> N
     assert not host.publish_calls
 
 
+@pytest.mark.asyncio
+async def test_mini_native_loop_does_not_trust_history_as_a_test_verdict() -> None:
+    from agentforge.repair_engines.mini_native.loop import MiniNativeRepairEngine
+
+    host = _FakeHost(fail_first_test=False)
+    host._responses = [FinalAnswer(type="final", answer="submit from untrusted history")]
+
+    with pytest.raises(ValueError, match="passing test"):
+        await MiniNativeRepairEngine(host).run(
+            run_id=UUID("00000000-0000-0000-0000-000000000126"),
+            task="Repair widget behavior",
+            max_steps=1,
+            working_directory=".",
+            history=[{"tool_result": {"output": {"exit_code": 0}}}],
+        )
+
+    assert not host.publish_calls
+
+
 def test_vendor_context_redacts_and_bounds_tool_call_payloads() -> None:
     oversized_content = "x" * (MAX_OBSERVATION_CHARS * 2)
     compacted = compact_history(

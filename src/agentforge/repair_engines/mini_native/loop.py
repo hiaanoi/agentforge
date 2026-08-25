@@ -69,11 +69,17 @@ class MiniNativeRepairEngine:
         self._host = host
 
     async def run(
-        self, *, run_id: UUID, task: str, max_steps: int, working_directory: str
+        self,
+        *,
+        run_id: UUID,
+        task: str,
+        max_steps: int,
+        working_directory: str,
+        history: list[JsonValue] | None = None,
+        last_test_passed: bool = False,
     ) -> MiniNativeResult:
-        history: list[JsonValue] = []
+        history = list(history or [])
         candidate: CandidatePatchResult | None = None
-        last_test_passed = False
 
         def build_request(step: int, compacted_history: list[JsonValue]) -> ModelRequest:
             return ModelRequest(

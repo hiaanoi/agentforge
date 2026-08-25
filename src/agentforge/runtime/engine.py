@@ -99,6 +99,11 @@ from agentforge.repair_engines.mini_linear import (
     MiniLinearRepairEngine,
     SubprocessCandidateShell,
 )
+from agentforge.repair_engines.mini_native.agentforge_host import (
+    AgentForgeMiniNativeHost,
+    MiniNativeApprovalPaused,
+)
+from agentforge.repair_engines.mini_native.loop import MiniNativeRepairEngine
 from agentforge.repair_engines.models import RepairEngineKind
 from agentforge.runtime.candidate_patch import CandidatePatchPublisher, CandidatePatchStore
 from agentforge.runtime.candidate_workspace import CandidateWorkspace
@@ -303,16 +308,14 @@ class AgentRuntime:
         run = self._runs.get(run_id)
         if run.status is not RunStatus.CREATED:
             raise ResumeNotAllowedError("Only a CREATED Run can execute from the beginning")
-        if self._repair_engine is RepairEngineKind.MINI_NATIVE:
-            raise RuntimeError(
-                "Mini native runtime is registered but not wired yet"
-            )
         run.transition_to(RunStatus.RUNNING)
         authority = self._authority(ownership, run.run_id)
         self._runs.save(run, authority=authority)
         self._append_event(ownership, run.run_id, EventType.RUN_STARTED)
         if self._repair_engine is RepairEngineKind.MINI_LINEAR:
             return await self._run_mini_linear(ownership, run)
+        if self._repair_engine is RepairEngineKind.MINI_NATIVE:
+            return await self._run_mini_native(ownership, run)
         return await self._run_loop(
             ownership,
             run,
@@ -382,6 +385,76 @@ class AgentRuntime:
             None,
             None,
             None,
+        )
+
+    async def _run_mini_native(
+        self,
+        ownership: RunOwnership,
+        run: Run,
+        history: list[JsonValue] | None = None,
+        last_test_passed: bool = False,
+    ) -> Run:
+        if (
+            self._workspace is None
+            or self._candidate_publisher is None
+            or self._candidate_store is None
+        ):
+            raise RuntimeError("Mini native runtime is missing candidate workspace components")
+
+        def pause(
+            call: ToolCall, required: ApprovalRequired, paused_history: list[JsonValue]
+        ) -> None:
+            context = self._context_builder.build(
+                task=run.task,
+                items=self._context_items_from_history(paused_history),
+                step_number=run.current_step,
+            )
+            self._pause_for_approval(
+                ownership,
+                run,
+                call,
+                required,
+                paused_history,
+                list(context.items),
+                LoopState(),
+                context.state,
+                None,
+                None,
+                None,
+            )
+
+        host = AgentForgeMiniNativeHost(
+            run=run,
+            ownership=ownership,
+            runs=self._runs,
+            events=self._events,
+            checkpoints=self._checkpoints,
+            provider=self._model,
+            model_executor=self._model_executor,
+            tools=self._tools,
+            candidate_publisher=self._candidate_publisher,
+            candidate_store=self._candidate_store,
+            workspace=str(self._workspace),
+            pause_for_approval=pause,
+            history=history,
+        )
+        try:
+            result = await MiniNativeRepairEngine(host).run(
+                run_id=run.run_id,
+                task=run.task,
+                max_steps=run.max_steps - run.current_step,
+                working_directory=str(self._workspace),
+                history=history,
+                last_test_passed=last_test_passed,
+            )
+        except MiniNativeApprovalPaused:
+            return self._runs.get(run.run_id)
+        if result.submitted:
+            return self._complete_mini_linear_publish(ownership, self._runs.get(run.run_id))
+        return self._fail(
+            ownership,
+            self._runs.get(run.run_id),
+            f"Maximum step count of {run.max_steps} exhausted before candidate submission",
         )
 
     def _evaluator_only_fail_created(self, run_id: UUID, reason: str) -> Run:
@@ -647,15 +720,7 @@ class AgentRuntime:
                 ready = self._load_snapshot(
                     approvals.get(approval.approval_id), ResumePhase.READY_FOR_MODEL
                 )
-                return await self._run_loop(
-                    ownership,
-                    run,
-                    list(ready.history),
-                    ready.loop_state,
-                    list(ready.context_items),
-                    ready.last_test_result,
-                    ready.test_execution_state,
-                )
+                return await self._continue_after_approval(ownership, run, ready)
             if (
                 approval.consumption_state is ApprovalConsumptionState.CLAIMED
                 and approval.status is ApprovalStatus.APPROVED
@@ -720,15 +785,7 @@ class AgentRuntime:
                         return self._finish_repair_run(
                             ownership, run, repair_state.status
                         )
-                return await self._run_loop(
-                    ownership,
-                    run,
-                    list(snapshot.history),
-                    snapshot.loop_state,
-                    list(snapshot.context_items),
-                    snapshot.last_test_result,
-                    snapshot.test_execution_state,
-                )
+                return await self._continue_after_approval(ownership, run, snapshot)
 
             if recovered_result is None:
                 snapshot = self._load_snapshot(approval, ResumePhase.AWAITING_APPROVAL)
@@ -807,21 +864,13 @@ class AgentRuntime:
                 approvals.get(approval.approval_id),
                 ResumePhase.READY_FOR_MODEL,
             )
-            return await self._run_loop(
-                ownership,
-                run,
-                list(ready.history),
-                ready.loop_state,
-                list(ready.context_items),
-                ready.last_test_result,
-                ready.test_execution_state,
-            )
+            return await self._continue_after_approval(ownership, run, ready)
         except (CheckpointNotFoundError, ValidationError, ValueError) as exc:
             current = self._runs.get(run_id)
             return self._recovery_fail(
                 ownership,
                 current,
-                f"Approval checkpoint is invalid: {type(exc).__name__}",
+                f"Approval checkpoint is invalid: {type(exc).__name__}: {exc}",
             )
         except MutationOutcomeIndeterminateError:
             return self._runs.get(run_id)
@@ -843,6 +892,31 @@ class AgentRuntime:
             return self._runs.get(run_id)
         finally:
             self._active_runs.discard(run_id)
+
+    async def _continue_after_approval(
+        self, ownership: RunOwnership, run: Run, snapshot: RuntimeSnapshotV4
+    ) -> Run:
+        if self._repair_engine is RepairEngineKind.MINI_NATIVE:
+            latest_test_passed = (
+                snapshot.test_execution_state is ProcessExecutionStatus.COMPLETED
+                and snapshot.last_test_result is not None
+                and snapshot.last_test_result.success
+            )
+            return await self._run_mini_native(
+                ownership,
+                run,
+                list(snapshot.history),
+                latest_test_passed,
+            )
+        return await self._run_loop(
+            ownership,
+            run,
+            list(snapshot.history),
+            snapshot.loop_state,
+            list(snapshot.context_items),
+            snapshot.last_test_result,
+            snapshot.test_execution_state,
+        )
 
     def _complete_mini_linear_publish(
         self, ownership: RunOwnership, run: Run
