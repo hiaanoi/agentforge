@@ -12,7 +12,7 @@ from agentforge.application.run_driver import RunOwnership
 from agentforge.domain.enums import EventType, ResumePhase
 from agentforge.domain.models import ApprovalRequired, Run, ToolResult
 from agentforge.models.base import ModelProvider, ModelRequest, ToolCall
-from agentforge.models.domain import ModelResponse
+from agentforge.models.domain import ModelResponse, ModelUsage
 from agentforge.models.executor import ModelExecutor
 from agentforge.persistence.model_workflow import ModelWorkflow
 from agentforge.persistence.repositories import CheckpointRepository, EventRepository, RunRepository
@@ -46,6 +46,7 @@ class AgentForgeMiniNativeHost:
         checkpoints: CheckpointRepository,
         provider: ModelProvider,
         model_executor: ModelExecutor | None,
+        model_workflow: ModelWorkflow | None,
         tools: ToolExecutor,
         candidate_publisher: CandidatePatchPublisher,
         candidate_store: CandidatePatchStore,
@@ -60,12 +61,15 @@ class AgentForgeMiniNativeHost:
         self._checkpoints = checkpoints
         self._provider = provider
         self._model_executor = model_executor
+        self._model_workflow = model_workflow
         self._tools = tools
         self._candidate_publisher = candidate_publisher
         self._candidate_store = candidate_store
         self._workspace = workspace
         self._pause_for_approval = pause_for_approval
         self._history = list(history or [])
+        self._last_usage: ModelUsage | None = None
+        self._provider_usage_available = False
 
     async def generate(self, request: ModelRequest) -> ModelResponse:
         self._run.current_step += 1
@@ -88,6 +92,11 @@ class AgentForgeMiniNativeHost:
         else:
             response = await self._provider.generate(bound_request)
         response = response.model_copy(update={"model_call_id": model_call_id})
+        self._last_usage = response.usage
+        self._provider_usage_available = response.usage is not None
+        if response.usage is not None:
+            self._run.total_token_usage += response.usage.total_tokens or 0
+            self._runs.save(self._run, authority=self._ownership.authority)
         self._append_event(
             EventType.MODEL_RESPONDED,
             {
@@ -98,10 +107,26 @@ class AgentForgeMiniNativeHost:
                 "usage": (
                     response.usage.model_dump(mode="json") if response.usage is not None else None
                 ),
+                "usage_available": self._provider_usage_available,
                 "provider_metadata": response.sanitized_metadata,
             },
         )
         return response
+
+    async def prepare(
+        self,
+        action: RepairAction,
+        *,
+        history: list[JsonValue],
+        last_test_passed: bool,
+    ) -> None:
+        if action.run_id != self._run.run_id:
+            raise ValueError("Mini-native action belongs to another Run")
+        self._history = list(history)
+        self._save_checkpoint(
+            mini_native_pending_action=action,
+            mini_native_last_test_passed=last_test_passed,
+        )
 
     async def execute(self, action: RepairAction) -> RepairActionResult:
         if action.run_id != self._run.run_id:
@@ -124,11 +149,29 @@ class AgentForgeMiniNativeHost:
         if state.run_id != self._run.run_id:
             raise ValueError("Mini-native checkpoint belongs to another Run")
         self._history = list(state.history)
+        self._save_checkpoint()
+
+    def _save_checkpoint(
+        self,
+        *,
+        mini_native_pending_action: RepairAction | None = None,
+        mini_native_last_test_passed: bool = False,
+    ) -> None:
+        model_usage = self._model_usage()
         snapshot = RuntimeSnapshotV4(
             run_id=self._run.run_id,
             step_number=self._run.current_step,
             history=self._history,
             resume_phase=ResumePhase.READY_FOR_MODEL,
+            model_usage=model_usage,
+            model_request_count=(
+                self._model_workflow.get_state(self._run.run_id).model_request_count
+                if self._model_workflow is not None
+                else 0
+            ),
+            mini_native_pending_action=mini_native_pending_action,
+            mini_native_last_test_passed=mini_native_last_test_passed,
+            provider_usage_available=self._provider_usage_available,
         )
         checkpoint = self._checkpoints.save(
             self._run.run_id,
@@ -139,6 +182,18 @@ class AgentForgeMiniNativeHost:
         self._append_event(
             EventType.CHECKPOINT_SAVED,
             {"checkpoint_id": str(checkpoint.checkpoint_id), "step_number": checkpoint.step_number},
+        )
+
+    def _model_usage(self) -> ModelUsage:
+        if self._model_workflow is None:
+            return self._last_usage or ModelUsage()
+        state = self._model_workflow.get_state(self._run.run_id)
+        return ModelUsage(
+            input_tokens=state.input_tokens,
+            output_tokens=state.output_tokens,
+            total_tokens=state.total_tokens,
+            cached_input_tokens=state.cached_input_tokens,
+            reasoning_tokens=state.reasoning_tokens,
         )
 
     async def publish(self, run_id: UUID) -> CandidatePatchResult:

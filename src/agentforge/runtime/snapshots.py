@@ -9,6 +9,7 @@ from agentforge.domain.models import PendingToolCall, RuntimeSnapshot
 from agentforge.domain.repair import RepairCompletionStatus
 from agentforge.domain.test_execution import PendingTestExecution, TestResult
 from agentforge.models.domain import ModelUsage
+from agentforge.repair_engines.mini_native.contracts import RepairAction
 
 
 class SnapshotVersionError(ValueError):
@@ -110,6 +111,9 @@ class RuntimeSnapshotV4(BaseModel):
     last_test_result: TestResult | None = None
     test_execution_state: ProcessExecutionStatus | None = None
     repair: RepairSnapshotState | None = None
+    mini_native_pending_action: RepairAction | None = None
+    mini_native_last_test_passed: bool = False
+    provider_usage_available: bool = False
 
 
 def load_runtime_snapshot(

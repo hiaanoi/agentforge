@@ -59,6 +59,7 @@ class MiniNativeResult:
     candidate: CandidatePatchResult | None
     history: list[JsonValue]
     model_calls: int
+    last_test_passed: bool = False
 
 
 class MiniNativeRepairEngine:
@@ -103,6 +104,11 @@ class MiniNativeRepairEngine:
             history.append(_action_history_item(action))
             if action.kind is RepairActionKind.FINAL and not last_test_passed:
                 raise ValueError("A passing test is required before submission")
+            await self._host.prepare(
+                action,
+                history=history,
+                last_test_passed=last_test_passed,
+            )
             result = await self._host.execute(action)
             history.append(_result_history_item(action, result))
             if action.kind is RepairActionKind.TEST:
@@ -134,6 +140,41 @@ class MiniNativeRepairEngine:
             candidate=candidate,
             history=final_history,
             model_calls=model_calls,
+            last_test_passed=last_test_passed,
+        )
+
+    async def resume_pending(
+        self,
+        *,
+        action: RepairAction,
+        history: list[JsonValue],
+        last_test_passed: bool,
+    ) -> MiniNativeResult:
+        """Finish a response checkpoint without requesting the model again."""
+        candidate: CandidatePatchResult | None = None
+        if action.kind is RepairActionKind.FINAL and not last_test_passed:
+            raise ValueError("A passing test is required before submission")
+        result = await self._host.execute(action)
+        history.append(_result_history_item(action, result))
+        if action.kind is RepairActionKind.TEST:
+            last_test_passed = result.returncode == 0
+        elif action.kind is RepairActionKind.WRITE:
+            last_test_passed = False
+        if action.kind is RepairActionKind.FINAL and result.returncode in {None, 0}:
+            candidate = await self._host.publish(action.run_id)
+        await self._host.checkpoint(
+            MiniNativeState(
+                run_id=action.run_id,
+                step_number=1,
+                history=tuple(history),
+            )
+        )
+        return MiniNativeResult(
+            submitted=bool(candidate and candidate.published),
+            candidate=candidate,
+            history=history,
+            model_calls=0,
+            last_test_passed=last_test_passed,
         )
 
 

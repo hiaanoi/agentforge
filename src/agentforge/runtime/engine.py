@@ -103,7 +103,7 @@ from agentforge.repair_engines.mini_native.agentforge_host import (
     AgentForgeMiniNativeHost,
     MiniNativeApprovalPaused,
 )
-from agentforge.repair_engines.mini_native.contracts import sanitize_history
+from agentforge.repair_engines.mini_native.contracts import RepairAction, sanitize_history
 from agentforge.repair_engines.mini_native.loop import MiniNativeRepairEngine
 from agentforge.repair_engines.models import RepairEngineKind
 from agentforge.runtime.candidate_patch import CandidatePatchPublisher, CandidatePatchStore
@@ -397,6 +397,7 @@ class AgentRuntime:
         run: Run,
         history: list[JsonValue] | None = None,
         last_test_passed: bool = False,
+        pending_action: RepairAction | None = None,
     ) -> Run:
         if (
             self._workspace is None
@@ -435,6 +436,7 @@ class AgentRuntime:
             checkpoints=self._checkpoints,
             provider=self._model,
             model_executor=self._model_executor,
+            model_workflow=self._model_workflow,
             tools=self._tools,
             candidate_publisher=self._candidate_publisher,
             candidate_store=self._candidate_store,
@@ -443,14 +445,22 @@ class AgentRuntime:
             history=history,
         )
         try:
-            result = await MiniNativeRepairEngine(host).run(
-                run_id=run.run_id,
-                task=run.task,
-                max_steps=run.max_steps - run.current_step,
-                working_directory=str(self._workspace),
-                history=history,
-                last_test_passed=last_test_passed,
-            )
+            engine = MiniNativeRepairEngine(host)
+            if pending_action is not None:
+                result = await engine.resume_pending(
+                    action=pending_action,
+                    history=list(history or []),
+                    last_test_passed=last_test_passed,
+                )
+            else:
+                result = await engine.run(
+                    run_id=run.run_id,
+                    task=run.task,
+                    max_steps=run.max_steps - run.current_step,
+                    working_directory=str(self._workspace),
+                    history=history,
+                    last_test_passed=last_test_passed,
+                )
         except MiniNativeApprovalPaused:
             return self._runs.get(run.run_id)
         except (ModelOutputError, ModelProviderError, ModelRequestError) as exc:
@@ -475,6 +485,13 @@ class AgentRuntime:
             return self._fail_model_generation(ownership, run, error_code, str(exc))
         if result.submitted:
             return self._complete_mini_linear_publish(ownership, self._runs.get(run.run_id))
+        if pending_action is not None:
+            return await self._run_mini_native(
+                ownership,
+                self._runs.get(run.run_id),
+                result.history,
+                result.last_test_passed,
+            )
         return self._fail(
             ownership,
             self._runs.get(run.run_id),
@@ -685,6 +702,22 @@ class AgentRuntime:
         if run_id in self._active_runs:
             raise ResumeNotAllowedError("Run is already active in this Runtime")
         run = self._runs.get(run_id)
+        if self._repair_engine is RepairEngineKind.MINI_NATIVE and run.status is RunStatus.RUNNING:
+            checkpoint = self._checkpoints.latest(run_id)
+            if checkpoint is not None:
+                snapshot = load_runtime_snapshot(
+                    checkpoint.runtime_state,
+                    run_id=run_id,
+                    step_number=checkpoint.step_number,
+                )
+                if snapshot.mini_native_pending_action is not None:
+                    return await self._run_mini_native(
+                        ownership,
+                        run,
+                        sanitize_history(snapshot.history),
+                        snapshot.mini_native_last_test_passed,
+                        snapshot.mini_native_pending_action,
+                    )
         if run.status in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}:
             raise ResumeNotAllowedError(f"{run.status.value} Run cannot resume")
         requests = approvals.list_for_run(run_id)

@@ -2,6 +2,7 @@ import json
 from uuid import UUID
 
 import pytest
+from pydantic import JsonValue
 
 from agentforge.models.base import FinalAnswer, ModelRequest, ToolCall
 from agentforge.models.domain import ModelResponse
@@ -71,6 +72,15 @@ class _FakeHost:
             duration_ms=1,
             attempt_count=1,
         )
+
+    async def prepare(
+        self,
+        action: RepairAction,
+        *,
+        history: list[JsonValue],
+        last_test_passed: bool,
+    ) -> None:
+        del action, history, last_test_passed
 
     async def execute(self, action: RepairAction) -> RepairActionResult:
         self.actions.append(action)
