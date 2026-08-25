@@ -13,7 +13,19 @@ from agentforge.models.base import FinalAnswer, ModelRequest
 from agentforge.models.domain import ModelResponse
 from agentforge.repair_engines.mini_native.agentforge_host import AgentForgeMiniNativeHost
 from agentforge.repair_engines.models import RepairEngineKind
-from tests.integration.test_mini_native_runtime import _create_product_run, _request
+from tests.integration.test_mini_native_bash_runtime import (
+    _bash_request,
+    _FakeBashEnvironment,
+)
+from tests.integration.test_mini_native_runtime import _create_product_run
+
+
+def _build_bash_components(request: Any, environment: _FakeBashEnvironment) -> Any:
+    components = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    components.runtime._mini_native_environment = environment
+    return components
 
 
 @pytest.mark.asyncio
@@ -21,30 +33,27 @@ async def test_mini_native_resumes_a_durably_saved_response_without_replaying_th
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    request, workspace = _request(tmp_path)
-    components = RuntimeComponentFactory().build(
-        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
-    )
+    request, workspace, _ = _bash_request(tmp_path)
+    environment = _FakeBashEnvironment(workspace)
+    components = _build_bash_components(request, environment)
     run = _create_product_run(request, workspace)
 
     async def interrupt_before_first_tool(*args: object, **kwargs: object) -> object:
         del args, kwargs
         raise RuntimeError("interrupt after model response")
 
-    monkeypatch.setattr(components.runtime._tools, "execute", interrupt_before_first_tool)
+    monkeypatch.setattr(AgentForgeMiniNativeHost, "execute", interrupt_before_first_tool)
     with pytest.raises(RuntimeError, match="interrupt after model response"):
         await components.runtime.execute(run.run_id)
 
     monkeypatch.undo()
-    reopened = RuntimeComponentFactory().build(
-        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
-    )
+    reopened = _build_bash_components(request, environment)
     resumed = await reopened.runtime.resume(run.run_id)
 
     assert resumed.run_id == run.run_id
     assert resumed.status is RunStatus.WAITING_APPROVAL
     pending = reopened.runtime.list_pending_approvals(run.run_id)
-    assert [approval.tool_name for approval in pending] == ["edit_file"]
+    assert [approval.tool_name for approval in pending] == ["bash"]
     assert len(request.provider.requests) == 2
     events = request.events.list_for_run(run.run_id)
     assert [event.sequence_number for event in events] == list(
@@ -57,10 +66,9 @@ async def test_product_resume_command_continues_a_completed_mini_native_checkpoi
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    request, workspace = _request(tmp_path)
-    components = RuntimeComponentFactory().build(
-        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
-    )
+    request, workspace, _ = _bash_request(tmp_path)
+    environment = _FakeBashEnvironment(workspace)
+    components = _build_bash_components(request, environment)
     run = _create_product_run(request, workspace)
     original = AgentForgeMiniNativeHost.checkpoint
 
@@ -75,9 +83,7 @@ async def test_product_resume_command_continues_a_completed_mini_native_checkpoi
         await components.runtime.execute(run.run_id)
 
     monkeypatch.undo()
-    reopened = RuntimeComponentFactory().build(
-        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
-    )
+    reopened = _build_bash_components(request, environment)
     outcome = await reopened.runtime.resume(ResumeRun(command_id=uuid4(), run_id=run.run_id))
 
     assert outcome.value is not None
@@ -101,11 +107,9 @@ class _EarlyFinalProvider:
 
 @pytest.mark.asyncio
 async def test_mini_native_early_final_terminalizes_the_run(tmp_path: Any) -> None:
-    request, workspace = _request(tmp_path)
+    request, workspace, _ = _bash_request(tmp_path)
     request = replace(request, provider=_EarlyFinalProvider())
-    components = RuntimeComponentFactory().build(
-        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
-    )
+    components = _build_bash_components(request, _FakeBashEnvironment(workspace))
     run = _create_product_run(request, workspace)
 
     failed = await components.runtime.execute(run.run_id)
@@ -118,10 +122,9 @@ async def test_response_checkpoint_rejects_a_side_effect_recovery_choice(
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    request, workspace = _request(tmp_path)
-    components = RuntimeComponentFactory().build(
-        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
-    )
+    request, workspace, _ = _bash_request(tmp_path)
+    environment = _FakeBashEnvironment(workspace)
+    components = _build_bash_components(request, environment)
     run = _create_product_run(request, workspace)
     original = AgentForgeMiniNativeHost.generate
 
@@ -136,9 +139,7 @@ async def test_response_checkpoint_rejects_a_side_effect_recovery_choice(
         await components.runtime.execute(run.run_id)
 
     monkeypatch.undo()
-    reopened = RuntimeComponentFactory().build(
-        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
-    )
+    reopened = _build_bash_components(request, environment)
     outcome = await reopened.runtime.resume(
         ResumeRun(
             command_id=uuid4(),
@@ -156,10 +157,9 @@ async def test_mini_native_checkpoints_before_control_returns_from_generate(
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    request, workspace = _request(tmp_path)
-    components = RuntimeComponentFactory().build(
-        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
-    )
+    request, workspace, _ = _bash_request(tmp_path)
+    environment = _FakeBashEnvironment(workspace)
+    components = _build_bash_components(request, environment)
     run = _create_product_run(request, workspace)
     original = AgentForgeMiniNativeHost.generate
 
@@ -174,9 +174,7 @@ async def test_mini_native_checkpoints_before_control_returns_from_generate(
         await components.runtime.execute(run.run_id)
 
     monkeypatch.undo()
-    reopened = RuntimeComponentFactory().build(
-        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
-    )
+    reopened = _build_bash_components(request, environment)
     resumed = await reopened.runtime.resume(run.run_id)
 
     assert resumed.status is RunStatus.WAITING_APPROVAL
@@ -188,10 +186,9 @@ async def test_product_resume_command_recovers_a_running_mini_native_response_ch
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    request, workspace = _request(tmp_path)
-    components = RuntimeComponentFactory().build(
-        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
-    )
+    request, workspace, _ = _bash_request(tmp_path)
+    environment = _FakeBashEnvironment(workspace)
+    components = _build_bash_components(request, environment)
     run = _create_product_run(request, workspace)
     original = AgentForgeMiniNativeHost.generate
 
@@ -206,9 +203,7 @@ async def test_product_resume_command_recovers_a_running_mini_native_response_ch
         await components.runtime.execute(run.run_id)
 
     monkeypatch.undo()
-    reopened = RuntimeComponentFactory().build(
-        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
-    )
+    reopened = _build_bash_components(request, environment)
     outcome = await reopened.runtime.resume(ResumeRun(command_id=uuid4(), run_id=run.run_id))
 
     assert outcome.value is not None
@@ -221,10 +216,9 @@ async def test_mini_native_reuses_a_saved_approval_free_action_result_on_restart
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    request, workspace = _request(tmp_path)
-    components = RuntimeComponentFactory().build(
-        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
-    )
+    request, workspace, _ = _bash_request(tmp_path)
+    environment = _FakeBashEnvironment(workspace)
+    components = _build_bash_components(request, environment)
     run = _create_product_run(request, workspace)
     original = AgentForgeMiniNativeHost.execute
 
@@ -239,20 +233,11 @@ async def test_mini_native_reuses_a_saved_approval_free_action_result_on_restart
         await components.runtime.execute(run.run_id)
 
     monkeypatch.undo()
-    reopened = RuntimeComponentFactory().build(
-        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
-    )
-    original_tool_execute = reopened.runtime._tools.execute
-
-    async def reject_duplicate_read(*args: Any, **kwargs: Any) -> object:
-        if args[1] == "read_file":
-            raise AssertionError("recovery re-executed saved read action")
-        return await original_tool_execute(*args, **kwargs)
-
-    monkeypatch.setattr(reopened.runtime._tools, "execute", reject_duplicate_read)
+    reopened = _build_bash_components(request, environment)
     resumed = await reopened.runtime.resume(run.run_id)
 
     assert resumed.status is RunStatus.WAITING_APPROVAL
+    assert environment.commands.count("rg -n VALUE src/value.py") == 1
 
 
 @pytest.mark.asyncio
@@ -260,10 +245,9 @@ async def test_mini_native_recovers_a_claimed_mutation_without_a_duplicate_edit(
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    request, workspace = _request(tmp_path)
-    components = RuntimeComponentFactory().build(
-        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
-    )
+    request, workspace, _ = _bash_request(tmp_path)
+    environment = _FakeBashEnvironment(workspace)
+    components = _build_bash_components(request, environment)
     run = _create_product_run(request, workspace)
 
     waiting = await components.runtime.execute(run.run_id)
@@ -271,32 +255,32 @@ async def test_mini_native_recovers_a_claimed_mutation_without_a_duplicate_edit(
     [approval] = components.runtime.list_pending_approvals(run.run_id)
     components.runtime.approve(approval.approval_id)
 
-    original = components.runtime._tools.execute
+    original = AgentForgeMiniNativeHost.execute_approved_bash
 
-    async def interrupt_after_mutation(*args: Any, **kwargs: Any) -> object:
-        result = await original(*args, **kwargs)
-        if kwargs.get("approval") is not None:
-            raise RuntimeError("interrupt during mutation approval")
-        return result
+    async def interrupt_after_mutation(
+        self: AgentForgeMiniNativeHost, *args: Any, **kwargs: Any
+    ) -> object:
+        await original(self, *args, **kwargs)
+        raise RuntimeError("interrupt during mutation approval")
 
-    monkeypatch.setattr(components.runtime._tools, "execute", interrupt_after_mutation)
+    monkeypatch.setattr(
+        AgentForgeMiniNativeHost,
+        "execute_approved_bash",
+        interrupt_after_mutation,
+    )
     with pytest.raises(RuntimeError, match="interrupt during mutation approval"):
         await components.runtime.resume(run.run_id)
 
     monkeypatch.undo()
-    reopened = RuntimeComponentFactory().build(
-        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
-    )
+    reopened = _build_bash_components(request, environment)
     recovered = await reopened.runtime.resume(run.run_id)
 
     assert recovered.run_id == run.run_id
     assert recovered.status is RunStatus.WAITING_APPROVAL
-    assert (workspace / "src" / "value.py").read_bytes() == (
-        b"VALUE = 1\n# sk-live-secret-value\n"
-    )
-    assert len(reopened.mutation_coordinator.list_executions(run.run_id)) == 1
+    assert (workspace / "src" / "value.py").read_text(encoding="utf-8") == "VALUE = 2\n"
+    assert environment.commands.count("sed -i 's/VALUE = 0/VALUE = 2/' src/value.py") == 1
     events = request.events.list_for_run(run.run_id)
-    assert sum(event.event_type is EventType.MUTATION_COMMITTED for event in events) == 1
+    assert sum(event.event_type is EventType.BASH_COMPLETED for event in events) == 2
     assert [event.sequence_number for event in events] == list(
         range(1, len(events) + 1)
     )

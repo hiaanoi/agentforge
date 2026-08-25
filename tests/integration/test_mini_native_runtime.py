@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import subprocess
 import sys
@@ -16,7 +15,7 @@ from agentforge.application.product_workspace import ProductWorkspaceCapture
 from agentforge.application.run_creation import RunCreationWorkflow, StartRun
 from agentforge.application.runtime_factory import RuntimeAssemblyRequest, RuntimeComponentFactory
 from agentforge.context.models import ContextPolicy
-from agentforge.domain.enums import EventType, ProcessExecutionStatus, RunStatus
+from agentforge.domain.enums import EventType, RunStatus
 from agentforge.domain.models import Run
 from agentforge.domain.repair import BudgetProfile, RepairDifficulty, RepairTaskPolicy
 from agentforge.models.base import ModelRequest, parse_model_output
@@ -27,6 +26,7 @@ from agentforge.persistence.legacy_evaluator import LegacyEvaluatorEventReposito
 from agentforge.persistence.profile_trust import ProfileKernel
 from agentforge.persistence.repair_workflow import RepairWorkflow
 from agentforge.persistence.source_revisions import DIGEST_ALGORITHM_VERSION
+from agentforge.repair_engines.mini_native.environment import BashObservation
 from agentforge.repair_engines.models import RepairEngineKind
 from agentforge.tools.paths import WorkspacePathResolver
 from agentforge.tools.testing.profiles import TestProfileDefinition as ProfileDefinition
@@ -40,32 +40,37 @@ class _ScriptedProvider:
     def __init__(self, target_sha: str) -> None:
         self._target_sha = target_sha
         self.requests: list[ModelRequest] = []
-        first_revision = b"VALUE = 1\n# sk-live-secret-value\n"
         self._responses = [
-            {"type": "tool_call", "tool": "read_file", "arguments": {"path": "src/value.py"}},
             {
                 "type": "tool_call",
-                "tool": "edit_file",
-                "arguments": {
-                    "path": "src/value.py",
-                    "old_text": "VALUE = 0\n",
-                    "new_text": first_revision.decode("utf-8"),
-                    "expected_sha256": target_sha,
-                },
+                "tool": "bash",
+                "arguments": {"command": "rg -n VALUE src/value.py"},
             },
-            {"type": "tool_call", "tool": "run_tests", "arguments": {"profile_id": "visible"}},
             {
                 "type": "tool_call",
-                "tool": "edit_file",
-                "arguments": {
-                    "path": "src/value.py",
-                    "old_text": first_revision.decode("utf-8"),
-                    "new_text": "VALUE = 2\n",
-                    "expected_sha256": hashlib.sha256(first_revision).hexdigest(),
-                },
+                "tool": "bash",
+                "arguments": {"command": "sed -i 's/VALUE = 0/VALUE = 1/' src/value.py"},
             },
-            {"type": "tool_call", "tool": "run_tests", "arguments": {"profile_id": "visible"}},
-            {"type": "final", "answer": "fixed"},
+            {
+                "type": "tool_call",
+                "tool": "bash",
+                "arguments": {"command": "custom_test --first"},
+            },
+            {
+                "type": "tool_call",
+                "tool": "bash",
+                "arguments": {"command": "sed -i 's/VALUE = 1/VALUE = 2/' src/value.py"},
+            },
+            {
+                "type": "tool_call",
+                "tool": "bash",
+                "arguments": {"command": "custom_test --second"},
+            },
+            {
+                "type": "tool_call",
+                "tool": "bash",
+                "arguments": {"command": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"},
+            },
         ]
 
     async def generate(self, request: ModelRequest) -> ModelResponse:
@@ -76,6 +81,44 @@ class _ScriptedProvider:
             model="mini-native",
             duration_ms=0,
             attempt_count=1,
+        )
+
+
+class _ScriptedBashEnvironment:
+    def __init__(self, workspace: Path) -> None:
+        self.workspace = workspace
+
+    async def execute(
+        self,
+        command: str,
+        *,
+        cwd: str,
+        timeout_seconds: float | None,
+    ) -> BashObservation:
+        del cwd, timeout_seconds
+        target = self.workspace / "src" / "value.py"
+        if command.startswith("rg "):
+            output, returncode = "src/value.py:1:VALUE = 0\n", 0
+        elif "VALUE = 0/VALUE = 1" in command:
+            target.write_text("VALUE = 1\n", encoding="utf-8")
+            output, returncode = "", 0
+        elif "VALUE = 1/VALUE = 2" in command:
+            target.write_text("VALUE = 2\n", encoding="utf-8")
+            output, returncode = "", 0
+        elif command == "custom_test --first":
+            output, returncode = "first test failed\n", 1
+        elif command == "custom_test --second":
+            output, returncode = "second test passed\n", 0
+        elif command.startswith("echo COMPLETE_TASK"):
+            output, returncode = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n", 0
+        else:
+            raise AssertionError(f"unexpected bash command: {command}")
+        return BashObservation(
+            output=output,
+            returncode=returncode,
+            exception_info=None,
+            timed_out=False,
+            duration_ms=1,
         )
 
 
@@ -241,6 +284,7 @@ async def test_mini_native_routes_read_write_test_and_publish_through_runtime(
     components = RuntimeComponentFactory().build(
         replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
     )
+    components.runtime._mini_native_environment = _ScriptedBashEnvironment(workspace)
     run = _create_product_run(request, workspace)
 
     waiting = await components.runtime.execute(run.run_id)
@@ -248,37 +292,16 @@ async def test_mini_native_routes_read_write_test_and_publish_through_runtime(
     assert waiting.status is RunStatus.WAITING_APPROVAL
     assert [
         approval.tool_name for approval in components.runtime.list_pending_approvals(run.run_id)
-    ] == ["edit_file"]
+    ] == ["bash"]
     first = components.runtime.list_pending_approvals(run.run_id)[0]
     components.runtime.approve(first.approval_id)
 
     waiting = await components.runtime.resume(run.run_id)
     assert waiting.status is RunStatus.WAITING_APPROVAL
-    assert components.runtime.list_pending_approvals(run.run_id)[0].tool_name == "run_tests"
+    assert components.runtime.list_pending_approvals(run.run_id)[0].tool_name == "bash"
     components.runtime.approve(components.runtime.list_pending_approvals(run.run_id)[0].approval_id)
 
     waiting = await components.runtime.resume(run.run_id)
-    assert waiting.status is RunStatus.WAITING_APPROVAL
-    assert components.runtime.list_pending_approvals(run.run_id)[0].tool_name == "edit_file"
-    components.runtime.approve(components.runtime.list_pending_approvals(run.run_id)[0].approval_id)
-
-    waiting = await components.runtime.resume(run.run_id)
-    assert waiting.status is RunStatus.WAITING_APPROVAL
-    assert components.runtime.list_pending_approvals(run.run_id)[0].tool_name == "run_tests"
-    second_test = components.runtime.list_pending_approvals(run.run_id)[0]
-    components.runtime.approve(second_test.approval_id)
-    monkeypatch.setattr(
-        components.test_coordinator,
-        "list_executions",
-        lambda run_id: (_ for _ in ()).throw(
-            AssertionError(f"resume for {run_id} must use its durable snapshot verdict")
-        ),
-    )
-
-    waiting = await components.runtime.resume(run.run_id)
-    assert components.test_coordinator.get_for_approval(second_test.approval_id).status is (
-        ProcessExecutionStatus.COMPLETED
-    )
     assert waiting.status is RunStatus.WAITING_APPROVAL
     assert (
         components.runtime.list_pending_approvals(run.run_id)[0].tool_name
@@ -289,19 +312,17 @@ async def test_mini_native_routes_read_write_test_and_publish_through_runtime(
     completed = await components.runtime.resume(run.run_id)
     assert completed.run_id == run.run_id
     assert completed.status is RunStatus.COMPLETED
-    assert (workspace / "src" / "value.py").read_bytes() == b"VALUE = 2\n"
-    assert len(components.mutation_coordinator.list_executions(run.run_id)) == 2
+    assert (workspace / "src" / "value.py").read_text(encoding="utf-8") == "VALUE = 2\n"
+    assert len(components.mutation_coordinator.list_executions(run.run_id)) == 0
     repair_state = request.repair_workflow.get_state(run.run_id)
     assert repair_state.edit_attempts_used == 2
-    assert repair_state.test_runs_used == 2
+    assert repair_state.test_runs_used == 0
     events = request.events.list_for_run(run.run_id)
     assert {
         EventType.MODEL_REQUESTED,
         EventType.MODEL_RESPONDED,
-        EventType.TOOL_REQUESTED,
-        EventType.MUTATION_COMMITTED,
-        EventType.TEST_FAILED,
-        EventType.TEST_COMPLETED,
+        EventType.BASH_REQUESTED,
+        EventType.BASH_COMPLETED,
     }.issubset({event.event_type for event in events})
     model_requested = [
         event for event in events if event.event_type is EventType.MODEL_REQUESTED
@@ -331,7 +352,6 @@ async def test_mini_native_routes_read_write_test_and_publish_through_runtime(
         and "repair" not in event.model_dump_json()
         for event in (*model_requested, *model_responded)
     )
-    assert "sk-live-secret-value" not in json.dumps(request.provider.requests[2].history)
     candidate = components.runtime._candidate_store.load(
         components.runtime._candidate_store.path_for(run.run_id)
     )
@@ -347,6 +367,7 @@ async def test_mini_native_model_failure_terminalizes_run_and_audit_events(
     components = RuntimeComponentFactory().build(
         replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
     )
+    components.runtime._mini_native_environment = _ScriptedBashEnvironment(workspace)
     run = _create_product_run(request, workspace)
 
     failed = await components.runtime.execute(run.run_id)

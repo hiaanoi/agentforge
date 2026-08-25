@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from time import perf_counter
+from typing import Protocol
 from uuid import UUID, uuid4
 
 from pydantic import JsonValue
@@ -16,6 +17,7 @@ from agentforge.models.domain import ModelResponse, ModelUsage
 from agentforge.models.executor import ModelExecutor
 from agentforge.persistence.model_workflow import ModelWorkflow
 from agentforge.persistence.repositories import CheckpointRepository, EventRepository, RunRepository
+from agentforge.repair_engines.mini_native.classifier import CommandKind, classify_command
 from agentforge.repair_engines.mini_native.contracts import (
     CandidatePatchResult,
     MiniNativeState,
@@ -25,6 +27,7 @@ from agentforge.repair_engines.mini_native.contracts import (
     action_history_item,
     to_repair_action,
 )
+from agentforge.repair_engines.mini_native.environment import BashObservation
 from agentforge.repair_engines.mini_native.host import bound_output
 from agentforge.runtime.candidate_patch import CandidatePatchPublisher, CandidatePatchStore
 from agentforge.runtime.snapshots import RuntimeSnapshotV5
@@ -33,6 +36,19 @@ from agentforge.tools.executor import ToolExecutor
 
 class MiniNativeApprovalPaused(RuntimeError):
     """Stops the vendored loop after AgentForge has durably queued an approval."""
+
+
+class MiniNativeBashEnvironment(Protocol):
+    async def execute(
+        self,
+        command: str,
+        *,
+        cwd: str,
+        timeout_seconds: float | None,
+    ) -> BashObservation: ...
+
+
+BashEnvironmentCallback = Callable[..., Awaitable[BashObservation]]
 
 
 class AgentForgeMiniNativeHost:
@@ -53,8 +69,19 @@ class AgentForgeMiniNativeHost:
         candidate_publisher: CandidatePatchPublisher,
         candidate_store: CandidatePatchStore,
         workspace: str,
+        environment: MiniNativeBashEnvironment | BashEnvironmentCallback,
+        test_profile_for_command: Callable[[str], str | None],
         pause_for_approval: Callable[
-            [ToolCall, ApprovalRequired, list[JsonValue], bool, dict[str, JsonValue], ModelUsage],
+            [
+                ToolCall,
+                ApprovalRequired,
+                list[JsonValue],
+                bool,
+                dict[str, JsonValue],
+                ModelUsage,
+                RepairAction | None,
+                RepairActionResult | None,
+            ],
             None,
         ],
         history: list[JsonValue] | None = None,
@@ -62,6 +89,8 @@ class AgentForgeMiniNativeHost:
         provider_usage_available: bool = False,
         last_provider_metadata: dict[str, JsonValue] | None = None,
         last_model_usage: ModelUsage | None = None,
+        pending_action: RepairAction | None = None,
+        pending_action_result: RepairActionResult | None = None,
     ) -> None:
         self._run = run
         self._ownership = ownership
@@ -75,12 +104,16 @@ class AgentForgeMiniNativeHost:
         self._candidate_publisher = candidate_publisher
         self._candidate_store = candidate_store
         self._workspace = workspace
+        self._environment = environment
+        self._test_profile_for_command = test_profile_for_command
         self._pause_for_approval = pause_for_approval
         self._history = list(history or [])
         self._last_test_passed = last_test_passed
         self._last_usage = last_model_usage
         self._provider_usage_available = provider_usage_available
         self._last_provider_metadata = dict(last_provider_metadata or {})
+        self._pending_action = pending_action
+        self._pending_action_result = pending_action_result
 
     async def generate(self, request: ModelRequest) -> ModelResponse:
         self._run.current_step += 1
@@ -139,6 +172,8 @@ class AgentForgeMiniNativeHost:
             raise ValueError("Mini-native action belongs to another Run")
         if action.kind is RepairActionKind.FINAL:
             return await self._queue_candidate_publication(action)
+        if action.kind is RepairActionKind.BASH:
+            return await self._execute_bash(action)
         started = perf_counter()
         outcome = await self._tools.execute(
             self._run,
@@ -156,6 +191,154 @@ class AgentForgeMiniNativeHost:
         )
         return result
 
+    async def execute_approved_bash(
+        self,
+        action: RepairAction,
+        *,
+        approval_id: UUID,
+        approval_digest: str,
+    ) -> RepairActionResult:
+        """Execute one already-claimed bash write and durably save its observation."""
+        if action.run_id != self._run.run_id or action.kind is not RepairActionKind.BASH:
+            raise ValueError("Approved bash action identity does not match this Run")
+        result = await self._execute_environment(action)
+        self._save_checkpoint(
+            mini_native_pending_action=action,
+            mini_native_pending_action_result=result,
+            resume_phase=ResumePhase.AWAITING_APPROVAL,
+            pending_approval_id=approval_id,
+            tool_call_digest=approval_digest,
+        )
+        self._append_bash_completed(action, result, executed=True)
+        return result
+
+    def complete_managed_bash(
+        self,
+        action: RepairAction,
+        outcome: ToolResult,
+    ) -> RepairActionResult:
+        """Translate a managed test result back into the upstream bash observation."""
+        result = self._result(action, outcome, perf_counter())
+        self._run.tool_call_count += 1
+        self._runs.save(self._run, authority=self._ownership.authority)
+        self._append_bash_completed(action, result, executed=True)
+        return result
+
+    def complete_rejected_bash(self, action: RepairAction) -> RepairActionResult:
+        result = RepairActionResult(
+            returncode=1,
+            stderr="AgentForge approval rejected the bash command",
+            duration_ms=0,
+        )
+        self._append_bash_completed(action, result, executed=False)
+        return result
+
+    async def _execute_bash(self, action: RepairAction) -> RepairActionResult:
+        command = self._command(action)
+        kind = classify_command(command)
+        self._append_event(
+            EventType.BASH_REQUESTED,
+            {
+                "action_id": str(action.action_id),
+                "arguments_digest": action.arguments_digest,
+                "command_kind": kind.value,
+            },
+        )
+        if kind is CommandKind.WRITE:
+            required = ApprovalRequired(
+                tool_name="bash",
+                validated_arguments={"command": command},
+                sanitized_arguments={
+                    "command": "<approved bash write>",
+                    "command_digest": action.arguments_digest,
+                },
+            )
+            self._pause(action, required)
+        if kind is CommandKind.TEST:
+            profile_id = self._test_profile_for_command(command)
+            if profile_id is not None:
+                outcome = await self._tools.execute(
+                    self._run,
+                    "run_tests",
+                    {"profile_id": profile_id},
+                    ownership=self._ownership,
+                )
+                if isinstance(outcome, ApprovalRequired):
+                    self._pause(
+                        action,
+                        outcome,
+                        call=ToolCall(
+                            type="tool_call",
+                            call_id=str(action.action_id),
+                            tool="run_tests",
+                            arguments={"profile_id": profile_id},
+                            reason="Run the bash test command through its registered profile",
+                        ),
+                    )
+                assert isinstance(outcome, ToolResult)
+                result = self.complete_managed_bash(action, outcome)
+                self._save_checkpoint(
+                    mini_native_pending_action=action,
+                    mini_native_pending_action_result=result,
+                )
+                return result
+        result = await self._execute_environment(action)
+        self._save_checkpoint(
+            mini_native_pending_action=action,
+            mini_native_pending_action_result=result,
+        )
+        self._append_bash_completed(action, result, executed=True)
+        return result
+
+    async def _execute_environment(self, action: RepairAction) -> RepairActionResult:
+        command = self._command(action)
+        executor = (
+            self._environment
+            if callable(self._environment)
+            else self._environment.execute
+        )
+        observation = await executor(
+            command,
+            cwd=action.working_directory,
+            timeout_seconds=3600.0 if classify_command(command) is CommandKind.TEST else 30.0,
+        )
+        stderr = observation.exception_info or ""
+        result = RepairActionResult(
+            returncode=observation.returncode,
+            stdout=observation.output,
+            stderr=stderr,
+            duration_ms=observation.duration_ms,
+        )
+        self._run.tool_call_count += 1
+        self._runs.save(self._run, authority=self._ownership.authority)
+        return result
+
+    def _append_bash_completed(
+        self,
+        action: RepairAction,
+        result: RepairActionResult,
+        *,
+        executed: bool,
+    ) -> None:
+        self._append_event(
+            EventType.BASH_COMPLETED,
+            {
+                "action_id": str(action.action_id),
+                "arguments_digest": action.arguments_digest,
+                "returncode": result.returncode,
+                "duration_ms": result.duration_ms,
+                "truncated": result.truncated,
+                "executed": executed,
+            },
+        )
+
+    @staticmethod
+    def _command(action: RepairAction) -> str:
+        command = action.arguments.get("command")
+        if not isinstance(command, str) or not command.strip():
+            raise ValueError("Mini-native bash action requires a non-empty command")
+        return command
+
     async def checkpoint(self, state: MiniNativeState) -> None:
         if state.run_id != self._run.run_id:
             raise ValueError("Mini-native checkpoint belongs to another Run")
@@ -168,13 +351,20 @@ class AgentForgeMiniNativeHost:
         *,
         mini_native_pending_action: RepairAction | None = None,
         mini_native_pending_action_result: RepairActionResult | None = None,
+        resume_phase: ResumePhase = ResumePhase.READY_FOR_MODEL,
+        pending_approval_id: UUID | None = None,
+        tool_call_digest: str | None = None,
     ) -> None:
+        self._pending_action = mini_native_pending_action
+        self._pending_action_result = mini_native_pending_action_result
         model_usage = self._model_usage()
         snapshot = RuntimeSnapshotV5(
             run_id=self._run.run_id,
             step_number=self._run.current_step,
             history=self._history,
-            resume_phase=ResumePhase.READY_FOR_MODEL,
+            pending_approval_id=pending_approval_id,
+            tool_call_digest=tool_call_digest,
+            resume_phase=resume_phase,
             model_usage=model_usage,
             model_request_count=(
                 self._model_workflow.get_state(self._run.run_id).model_request_count
@@ -215,14 +405,14 @@ class AgentForgeMiniNativeHost:
             raise ValueError("Candidate publication belongs to another Run")
         patch = self._candidate_publisher.capture(Path(self._workspace))
         self._candidate_store.save(str(run_id), patch)
-        return CandidatePatchResult(
+        candidate = CandidatePatchResult(
             run_id=run_id,
             published=False,
             patch_digest=patch.manifest_digest,
         )
-
-    async def _queue_candidate_publication(self, action: RepairAction) -> RepairActionResult:
-        candidate = await self.publish(action.run_id)
+        action = self._pending_action
+        if action is None:
+            raise ValueError("Candidate publication has no pending bash action")
         if candidate.patch_digest is None:
             raise ValueError("Candidate patch publication is missing its manifest digest")
         call = ToolCall(
@@ -238,11 +428,19 @@ class AgentForgeMiniNativeHost:
         outcome = await self._tools.execute(
             self._run, call.tool, call.arguments, ownership=self._ownership
         )
-        if not isinstance(outcome, ApprovalRequired):
-            assert isinstance(outcome, ToolResult)
-            return self._result(action, outcome, perf_counter())
-        self._pause(action, outcome, call=call)
-        raise AssertionError("approval pause must not return")
+        if isinstance(outcome, ApprovalRequired):
+            self._pause(action, outcome, call=call)
+        assert isinstance(outcome, ToolResult)
+        return candidate.model_copy(update={"published": outcome.success})
+
+    async def _queue_candidate_publication(self, action: RepairAction) -> RepairActionResult:
+        self._pending_action = action
+        candidate = await self.publish(action.run_id)
+        return RepairActionResult(
+            returncode=0 if candidate.published else 1,
+            stdout="Candidate patch published" if candidate.published else "",
+            duration_ms=0,
+        )
 
     def _pause(
         self,
@@ -265,6 +463,8 @@ class AgentForgeMiniNativeHost:
             self._provider_usage_available,
             self._last_provider_metadata,
             self._model_usage(),
+            action,
+            self._pending_action_result,
         )
         raise MiniNativeApprovalPaused()
 
@@ -277,13 +477,26 @@ class AgentForgeMiniNativeHost:
             else (outcome.error_message or ""),
         )
         returncode = 0 if outcome.success else 1
-        if action.kind is RepairActionKind.TEST and isinstance(outcome.output, dict):
+        stdout = output
+        stderr = ""
+        if isinstance(outcome.output, dict):
             exit_code = outcome.output.get("exit_code")
             if isinstance(exit_code, int):
                 returncode = exit_code
+            stdout_summary = outcome.output.get("stdout_summary")
+            stderr_summary = outcome.output.get("stderr_summary")
+            if isinstance(stdout_summary, str) or isinstance(stderr_summary, str):
+                stdout, stdout_truncated = bound_output(
+                    stdout_summary if isinstance(stdout_summary, str) else ""
+                )
+                stderr, stderr_truncated = bound_output(
+                    stderr_summary if isinstance(stderr_summary, str) else ""
+                )
+                output_truncated = output_truncated or stdout_truncated or stderr_truncated
         return RepairActionResult(
             returncode=returncode,
-            stdout=output,
+            stdout=stdout,
+            stderr=stderr,
             duration_ms=max(outcome.duration_ms, int((perf_counter() - started) * 1000)),
             truncated=outcome.truncated or output_truncated,
         )
@@ -295,4 +508,9 @@ class AgentForgeMiniNativeHost:
             )
 
 
-__all__ = ["AgentForgeMiniNativeHost", "MiniNativeApprovalPaused"]
+__all__ = [
+    "AgentForgeMiniNativeHost",
+    "BashEnvironmentCallback",
+    "MiniNativeApprovalPaused",
+    "MiniNativeBashEnvironment",
+]

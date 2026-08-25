@@ -1,5 +1,6 @@
 import hashlib
 import json
+import shlex
 from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
@@ -9,7 +10,10 @@ from uuid import UUID, uuid4
 from pydantic import JsonValue, ValidationError
 
 from agentforge.application.contracts import OutcomeStatus, ProfilePurpose, ReceiptStatus
-from agentforge.application.kernel_errors import StaleFenceError
+from agentforge.application.kernel_errors import (
+    SourceRevisionConflictError,
+    StaleFenceError,
+)
 from agentforge.application.run_commands import CancelRun, ResumeRecoveryChoice, ResumeRun
 from agentforge.application.run_driver import DriverOutcome, RunDriver, RunOwnership
 from agentforge.context.builder import ContextBuilder
@@ -54,7 +58,7 @@ from agentforge.domain.mutations import (
     MutationApprovalRequired,
     MutationExecutionRecord,
 )
-from agentforge.domain.repair import CompletionAction, RepairCompletionStatus
+from agentforge.domain.repair import BudgetKind, CompletionAction, RepairCompletionStatus
 from agentforge.domain.test_execution import (
     PendingTestExecution,
     ProcessExecutionRecord,
@@ -94,6 +98,10 @@ from agentforge.persistence.resume_workflow import (
 )
 from agentforge.persistence.run_control import RunControlRequest, RunControlWorkflow
 from agentforge.persistence.run_leases import RunLeaseStore
+from agentforge.persistence.source_revisions import (
+    SourceRevisionStore,
+    WorkspaceDigester,
+)
 from agentforge.repair_engines.mini_linear import (
     CandidateShell,
     MiniLinearRepairEngine,
@@ -101,8 +109,11 @@ from agentforge.repair_engines.mini_linear import (
 )
 from agentforge.repair_engines.mini_native.agentforge_host import (
     AgentForgeMiniNativeHost,
+    BashEnvironmentCallback,
     MiniNativeApprovalPaused,
+    MiniNativeBashEnvironment,
 )
+from agentforge.repair_engines.mini_native.classifier import CommandKind, classify_command
 from agentforge.repair_engines.mini_native.contracts import (
     RepairAction,
     RepairActionResult,
@@ -191,6 +202,7 @@ class AgentRuntime:
         candidate_shell_factory: Callable[[Path], CandidateShell] | None = None,
         candidate_publisher: CandidatePatchPublisher | None = None,
         candidate_store: CandidatePatchStore | None = None,
+        mini_native_environment: MiniNativeBashEnvironment | BashEnvironmentCallback | None = None,
     ) -> None:
         self._runs = run_repository
         self._events = event_repository
@@ -219,6 +231,7 @@ class AgentRuntime:
         self._candidate_shell_factory = candidate_shell_factory or SubprocessCandidateShell
         self._candidate_publisher = candidate_publisher
         self._candidate_store = candidate_store
+        self._mini_native_environment = mini_native_environment
 
     def create_run(
         self,
@@ -411,8 +424,9 @@ class AgentRuntime:
             self._workspace is None
             or self._candidate_publisher is None
             or self._candidate_store is None
+            or self._mini_native_environment is None
         ):
-            raise RuntimeError("Mini native runtime is missing candidate workspace components")
+            raise RuntimeError("Mini native runtime is missing bash workspace components")
 
         def pause(
             call: ToolCall,
@@ -421,6 +435,8 @@ class AgentRuntime:
             provider_usage_available: bool,
             last_provider_metadata: dict[str, JsonValue],
             last_model_usage: ModelUsage,
+            paused_action: RepairAction | None,
+            paused_action_result: RepairActionResult | None,
         ) -> None:
             context = self._context_builder.build(
                 task=run.task,
@@ -442,6 +458,8 @@ class AgentRuntime:
                 provider_usage_available=provider_usage_available,
                 last_provider_metadata=last_provider_metadata,
                 last_model_usage=last_model_usage,
+                mini_native_pending_action=paused_action,
+                mini_native_pending_action_result=paused_action_result,
             )
 
         host = AgentForgeMiniNativeHost(
@@ -457,12 +475,16 @@ class AgentRuntime:
             candidate_publisher=self._candidate_publisher,
             candidate_store=self._candidate_store,
             workspace=str(self._workspace),
+            environment=self._mini_native_environment,
+            test_profile_for_command=self._mini_native_test_profile,
             pause_for_approval=pause,
             history=history,
             last_test_passed=last_test_passed,
             provider_usage_available=provider_usage_available,
             last_provider_metadata=last_provider_metadata,
             last_model_usage=last_model_usage,
+            pending_action=pending_action,
+            pending_action_result=pending_action_result,
         )
         try:
             engine = MiniNativeRepairEngine(host)
@@ -514,11 +536,95 @@ class AgentRuntime:
                 self._runs.get(run.run_id),
                 result.history,
                 result.last_test_passed,
+                provider_usage_available=provider_usage_available,
+                last_provider_metadata=last_provider_metadata,
+                last_model_usage=last_model_usage,
             )
         return self._fail(
             ownership,
             self._runs.get(run.run_id),
             f"Maximum step count of {run.max_steps} exhausted before candidate submission",
+        )
+
+    def _mini_native_test_profile(self, command: str) -> str | None:
+        """Match only a complete simple command to a registered development profile."""
+        if self._test_executions is None:
+            return None
+        try:
+            actual = shlex.split(command, posix=True)
+        except ValueError:
+            return None
+        if not actual:
+            return None
+        normalized_actual = self._normalize_test_argv(actual)
+        for profile in self._test_executions._profiles.list_enabled():
+            if profile.purpose is not ProfilePurpose.DEVELOPMENT:
+                continue
+            if normalized_actual == self._normalize_test_argv(list(profile.argv)):
+                return profile.profile_id
+        return None
+
+    @staticmethod
+    def _normalize_test_argv(arguments: list[str]) -> tuple[str, ...]:
+        normalized = list(arguments)
+        executable = Path(normalized[0]).name.casefold()
+        if executable in {"python", "python.exe", "python3", "python3.exe"}:
+            normalized[0] = "python"
+        else:
+            normalized[0] = executable
+        return tuple(normalized)
+
+    @staticmethod
+    def _mini_native_action_is_test(action: RepairAction) -> bool:
+        command = action.arguments.get("command")
+        return isinstance(command, str) and classify_command(command) is CommandKind.TEST
+
+    @staticmethod
+    def _mini_native_action_is_write(action: RepairAction) -> bool:
+        command = action.arguments.get("command")
+        return isinstance(command, str) and classify_command(command) is CommandKind.WRITE
+
+    def _mini_native_resume_host(
+        self,
+        ownership: RunOwnership,
+        run: Run,
+        snapshot: RuntimeSnapshotV5,
+    ) -> AgentForgeMiniNativeHost:
+        if (
+            self._workspace is None
+            or self._candidate_publisher is None
+            or self._candidate_store is None
+            or self._mini_native_environment is None
+        ):
+            raise ValueError("Mini-native bash recovery components are unavailable")
+
+        def unexpected_pause(*args: object) -> None:
+            del args
+            raise AssertionError("A claimed bash approval cannot pause again")
+
+        return AgentForgeMiniNativeHost(
+            run=run,
+            ownership=ownership,
+            runs=self._runs,
+            events=self._events,
+            checkpoints=self._checkpoints,
+            provider=self._model,
+            model_executor=self._model_executor,
+            model_workflow=self._model_workflow,
+            tools=self._tools,
+            candidate_publisher=self._candidate_publisher,
+            candidate_store=self._candidate_store,
+            workspace=str(self._workspace),
+            environment=self._mini_native_environment,
+            test_profile_for_command=self._mini_native_test_profile,
+            pause_for_approval=unexpected_pause,
+            history=snapshot.history,
+            last_test_passed=snapshot.mini_native_last_test_passed,
+            provider_usage_available=snapshot.provider_usage_available,
+            last_provider_metadata=snapshot.last_provider_metadata,
+            last_model_usage=snapshot.model_usage,
+            pending_action=snapshot.mini_native_pending_action,
+            pending_action_result=snapshot.mini_native_pending_action_result,
         )
 
     def _evaluator_only_fail_created(self, run_id: UUID, reason: str) -> Run:
@@ -755,6 +861,80 @@ class AgentRuntime:
         )
         return snapshot.resume_phase is ResumePhase.READY_FOR_MODEL
 
+    def _recover_claimed_mini_native_bash(
+        self, approval: ApprovalRequest
+    ) -> ToolResult | None:
+        if self._repair_engine is not RepairEngineKind.MINI_NATIVE:
+            return None
+        checkpoint = self._checkpoints.latest(approval.run_id)
+        if checkpoint is None or checkpoint.checkpoint_id == approval.checkpoint_id:
+            return None
+        approval_checkpoint = self._checkpoints.get(approval.checkpoint_id)
+        original = load_runtime_snapshot(
+            approval_checkpoint.runtime_state,
+            run_id=approval_checkpoint.run_id,
+            step_number=approval_checkpoint.step_number,
+        )
+        snapshot = load_runtime_snapshot(
+            checkpoint.runtime_state,
+            run_id=checkpoint.run_id,
+            step_number=checkpoint.step_number,
+        )
+        action = snapshot.mini_native_pending_action
+        result = snapshot.mini_native_pending_action_result
+        if (
+            snapshot.resume_phase is not ResumePhase.AWAITING_APPROVAL
+            or snapshot.pending_approval_id != approval.approval_id
+            or snapshot.tool_call_digest != approval.request_digest
+            or action is None
+            or result is None
+            or original.mini_native_pending_action is None
+            or action.action_id != original.mini_native_pending_action.action_id
+        ):
+            return None
+        return ToolResult(
+            success=result.returncode == 0,
+            output={"mini_native_bash_result": result.model_dump(mode="json")},
+            duration_ms=result.duration_ms,
+            truncated=result.truncated,
+        )
+
+    def _advance_mini_native_bash_source(
+        self,
+        run_id: UUID,
+        snapshot: RuntimeSnapshotV5,
+        action: RepairAction,
+        *,
+        ownership: RunOwnership,
+    ) -> None:
+        if self._workspace is None or snapshot.mini_native_source_digest_before is None:
+            raise SourceRevisionConflictError()
+        before_digest = snapshot.mini_native_source_digest_before
+        after_digest = WorkspaceDigester().digest(self._workspace)
+        with self._runs.database.session() as session:
+            revisions = SourceRevisionStore()
+            current = revisions.get(session, run_id)
+            if current.expected_source_digest not in {before_digest, after_digest}:
+                raise SourceRevisionConflictError()
+            if current.expected_source_digest != after_digest:
+                revisions.advance(
+                    session,
+                    run_id,
+                    before_digest=before_digest,
+                    expected_after_digest=after_digest,
+                    expected_revision_number=current.source_revision_number,
+                    authority=self._authority(ownership, run_id),
+                )
+        if self._repairs is not None:
+            consumed = self._repairs.workflow.consume_budget(
+                run_id,
+                BudgetKind.EDIT,
+                f"mini-native-bash:{action.action_id}",
+                authority=self._authority(ownership, run_id),
+            )
+            if not consumed.consumed and consumed.exhausted:
+                raise ValueError("Mini-native bash edit budget is exhausted")
+
     async def _resume_owned(
         self,
         run_id: UUID,
@@ -880,12 +1060,20 @@ class AgentRuntime:
                         authority=self._authority(ownership, run_id),
                     )
                 else:
-                    workflow.mark_indeterminate(
-                        run_id,
-                        approval.approval_id,
-                        authority=self._authority(ownership, run_id),
+                    snapshot = self._load_snapshot(
+                        approval,
+                        ResumePhase.AWAITING_APPROVAL,
                     )
-                    return self._runs.get(run_id)
+                    recovered_result = self._recover_claimed_mini_native_bash(
+                        approval
+                    )
+                    if recovered_result is None:
+                        workflow.mark_indeterminate(
+                            run_id,
+                            approval.approval_id,
+                            authority=self._authority(ownership, run_id),
+                        )
+                        return self._runs.get(run_id)
                 if recovered_result is None:
                     if self._repairs is not None:
                         if mutation_binding is not None and self._mutations is not None:
@@ -1001,7 +1189,12 @@ class AgentRuntime:
                 ResumePhase.READY_FOR_MODEL,
             )
             return await self._continue_after_approval(ownership, run, ready)
-        except (CheckpointNotFoundError, ValidationError, ValueError) as exc:
+        except (
+            CheckpointNotFoundError,
+            SourceRevisionConflictError,
+            ValidationError,
+            ValueError,
+        ) as exc:
             current = self._runs.get(run_id)
             return self._recovery_fail(
                 ownership,
@@ -1045,9 +1238,11 @@ class AgentRuntime:
                 run,
                 sanitize_history(snapshot.history),
                 latest_test_passed,
+                snapshot.mini_native_pending_action,
                 provider_usage_available=snapshot.provider_usage_available,
                 last_provider_metadata=snapshot.last_provider_metadata,
                 last_model_usage=snapshot.model_usage,
+                pending_action_result=snapshot.mini_native_pending_action_result,
             )
         return await self._run_loop(
             ownership,
@@ -1113,6 +1308,13 @@ class AgentRuntime:
         call = snapshot.pending_tool_call
         if call is None:
             raise ValueError("Approval snapshot has no pending tool call")
+        mini_native_action = snapshot.mini_native_pending_action
+        if mini_native_action is not None and (
+            mini_native_action.run_id != run_id
+            or str(mini_native_action.action_id) != call.call_id
+        ):
+            raise ValueError("Approval snapshot bash action identity does not match")
+        mini_native_result: RepairActionResult | None = None
         final_verification = False
         if approval.status is ApprovalStatus.APPROVED:
             if recovered_result is not None:
@@ -1149,6 +1351,32 @@ class AgentRuntime:
                     ),
                     trusted_final_verification=trusted_final_verification,
                     ownership=ownership,
+                )
+                if mini_native_action is not None:
+                    mini_native_result = self._mini_native_resume_host(
+                        ownership,
+                        self._runs.get(run_id),
+                        snapshot,
+                    ).complete_managed_bash(mini_native_action, result)
+            elif mini_native_action is not None and call.tool == "bash":
+                mini_native_result = await self._mini_native_resume_host(
+                    ownership,
+                    self._runs.get(run_id),
+                    snapshot,
+                ).execute_approved_bash(
+                    mini_native_action,
+                    approval_id=approval.approval_id,
+                    approval_digest=approval.request_digest,
+                )
+                result = ToolResult(
+                    success=mini_native_result.returncode == 0,
+                    output={
+                        "mini_native_bash_result": mini_native_result.model_dump(
+                            mode="json"
+                        )
+                    },
+                    duration_ms=mini_native_result.duration_ms,
+                    truncated=mini_native_result.truncated,
                 )
             else:
                 started = perf_counter()
@@ -1191,6 +1419,45 @@ class AgentRuntime:
                     "approval_id": str(approval.approval_id),
                     "decision": "REJECTED",
                 },
+            )
+            if mini_native_action is not None:
+                mini_native_result = self._mini_native_resume_host(
+                    ownership,
+                    self._runs.get(run_id),
+                    snapshot,
+                ).complete_rejected_bash(mini_native_action)
+        if (
+            mini_native_action is not None
+            and call.tool == "publish_candidate_patch"
+            and snapshot.mini_native_pending_action_result is not None
+        ):
+            mini_native_result = snapshot.mini_native_pending_action_result
+        if mini_native_action is not None and mini_native_result is None:
+            if (
+                isinstance(result.output, dict)
+                and isinstance(result.output.get("mini_native_bash_result"), dict)
+            ):
+                mini_native_result = RepairActionResult.model_validate(
+                    result.output["mini_native_bash_result"]
+                )
+            else:
+                mini_native_result = self._mini_native_resume_host(
+                    ownership,
+                    self._runs.get(run_id),
+                    snapshot,
+                ).complete_managed_bash(mini_native_action, result)
+        if (
+            approval.status is ApprovalStatus.APPROVED
+            and mini_native_action is not None
+            and mini_native_result is not None
+            and mini_native_result.returncode == 0
+            and self._mini_native_action_is_write(mini_native_action)
+        ):
+            self._advance_mini_native_bash_source(
+                run_id,
+                snapshot,
+                mini_native_action,
+                ownership=ownership,
             )
         test_execution: ProcessExecutionRecord | None = None
         if (
@@ -1240,21 +1507,22 @@ class AgentRuntime:
                 authority=self._authority(ownership, run_id),
             )
         history = list(snapshot.history)
-        history.extend(
-            [
-                {
-                    "type": "tool_call",
-                    "call_id": call.call_id,
-                    "tool": call.tool,
-                    "arguments": call.arguments,
-                    "reason": call.reason,
-                },
-                {
-                    "tool_result": result.model_dump(mode="json"),
-                    "call_id": call.call_id,
-                },
-            ]
-        )
+        if mini_native_action is None:
+            history.extend(
+                [
+                    {
+                        "type": "tool_call",
+                        "call_id": call.call_id,
+                        "tool": call.tool,
+                        "arguments": call.arguments,
+                        "reason": call.reason,
+                    },
+                    {
+                        "tool_result": result.model_dump(mode="json"),
+                        "call_id": call.call_id,
+                    },
+                ]
+            )
         context_items = list(snapshot.context_items) or self._context_items_from_history(
             list(snapshot.history)
         )
@@ -1331,6 +1599,15 @@ class AgentRuntime:
             last_test_result=last_test_result,
             test_execution_state=test_execution_state,
             repair=(self._repairs.snapshot(run_id) if self._repairs is not None else None),
+            mini_native_pending_action=mini_native_action,
+            mini_native_pending_action_result=mini_native_result,
+            mini_native_last_test_passed=(
+                mini_native_result.returncode == 0
+                if mini_native_action is not None
+                and self._mini_native_action_is_test(mini_native_action)
+                and mini_native_result is not None
+                else snapshot.mini_native_last_test_passed
+            ),
         )
         checkpoint = Checkpoint(
             run_id=run_id,
@@ -1851,6 +2128,8 @@ class AgentRuntime:
         provider_usage_available: bool | None = None,
         last_provider_metadata: dict[str, JsonValue] | None = None,
         last_model_usage: ModelUsage | None = None,
+        mini_native_pending_action: RepairAction | None = None,
+        mini_native_pending_action_result: RepairActionResult | None = None,
     ) -> Run:
         _, workflow = self._require_approval_support()
         approval_id = uuid4()
@@ -1874,6 +2153,20 @@ class AgentRuntime:
                 profile_digest=test_plan.profile_digest,
                 argv_digest=test_plan.argv_digest,
                 environment_digest=test_plan.environment_digest,
+            )
+        mini_native_source_digest_before = None
+        if (
+            mini_native_pending_action is not None
+            and self._mini_native_action_is_write(mini_native_pending_action)
+            and self._workspace is not None
+        ):
+            if self._repairs is not None:
+                repair_state = self._repairs.state(run.run_id)
+                repair_policy = self._repairs.workflow.get_policy(run.run_id)
+                if repair_state.edit_attempts_used >= repair_policy.max_edit_attempts:
+                    raise ValueError("Mini-native bash edit budget is exhausted")
+            mini_native_source_digest_before = WorkspaceDigester().digest(
+                self._workspace
             )
         snapshot = RuntimeSnapshotV5(
             run_id=run.run_id,
@@ -1921,6 +2214,9 @@ class AgentRuntime:
             last_test_result=last_test_result,
             test_execution_state=test_execution_state,
             repair=(self._repairs.snapshot(run.run_id) if self._repairs is not None else None),
+            mini_native_pending_action=mini_native_pending_action,
+            mini_native_pending_action_result=mini_native_pending_action_result,
+            mini_native_source_digest_before=mini_native_source_digest_before,
         )
         checkpoint = Checkpoint(
             checkpoint_id=checkpoint_id,

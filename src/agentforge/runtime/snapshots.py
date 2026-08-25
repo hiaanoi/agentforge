@@ -148,6 +148,9 @@ class RuntimeSnapshotV5(BaseModel):
     mini_native_pending_action: RepairAction | None = None
     mini_native_pending_action_result: RepairActionResult | None = None
     mini_native_last_test_passed: bool = False
+    mini_native_source_digest_before: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
     provider_usage_available: bool = False
 
 

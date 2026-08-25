@@ -21,7 +21,11 @@ from agentforge.persistence.run_leases import RunLeaseStore
 from agentforge.repair_engines.mini_native.agentforge_host import AgentForgeMiniNativeHost
 from agentforge.repair_engines.models import RepairEngineKind
 from agentforge.runtime.snapshots import RuntimeSnapshotV5, load_runtime_snapshot
-from tests.integration.test_mini_native_runtime import _create_product_run, _request
+from tests.integration.test_mini_native_runtime import (
+    _create_product_run,
+    _request,
+    _ScriptedBashEnvironment,
+)
 
 
 class _ReadOnlyProvider:
@@ -43,7 +47,9 @@ class _ReadOnlyProvider:
             )
         return ModelResponse(
             action=ToolCall(
-                type="tool_call", tool="read_file", arguments={"path": "src/value.py"}
+                type="tool_call",
+                tool="bash",
+                arguments={"command": "rg -n VALUE src/value.py"},
             ),
             usage=self._usage,
             provider=self.name,
@@ -91,6 +97,7 @@ async def test_mini_native_checkpoint_and_event_make_provider_usage_availability
     components = RuntimeComponentFactory().build(
         replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
     )
+    components.runtime._mini_native_environment = _ScriptedBashEnvironment(workspace)
     run = _create_product_run(request, workspace)
 
     await components.runtime.execute(run.run_id)
@@ -159,6 +166,7 @@ async def test_mini_native_approval_snapshot_restores_available_usage_on_restart
     components = RuntimeComponentFactory().build(
         replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
     )
+    components.runtime._mini_native_environment = _ScriptedBashEnvironment(workspace)
     run = _create_product_run(request, workspace)
 
     waiting = await components.runtime.execute(run.run_id)
@@ -186,6 +194,7 @@ async def test_mini_native_approval_snapshot_restores_available_usage_on_restart
     reopened = RuntimeComponentFactory().build(
         replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
     )
+    reopened.runtime._mini_native_environment = _ScriptedBashEnvironment(workspace)
 
     resumed = await reopened.runtime.resume(run.run_id)
 
@@ -201,6 +210,7 @@ async def test_direct_provider_approval_keeps_last_usage_in_its_checkpoint(
     components = RuntimeComponentFactory().build(
         replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
     )
+    components.runtime._mini_native_environment = _ScriptedBashEnvironment(workspace)
     components.runtime._model_executor = None
     components.runtime._model_workflow = None
     run = _create_product_run(request, workspace)
