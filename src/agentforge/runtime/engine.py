@@ -557,12 +557,25 @@ class AgentRuntime:
         if not actual:
             return None
         normalized_actual = self._normalize_test_argv(actual)
+        family = self._test_command_family(normalized_actual)
+        family_match: str | None = None
+        family_score = 0
         for profile in self._test_executions._profiles.list_enabled():
             if profile.purpose is not ProfilePurpose.DEVELOPMENT:
                 continue
-            if normalized_actual == self._normalize_test_argv(list(profile.argv)):
+            normalized_profile = self._normalize_test_argv(list(profile.argv))
+            if normalized_actual == normalized_profile:
                 return profile.profile_id
-        return None
+            if family is None or family != self._test_command_family(normalized_profile):
+                continue
+            score = max(
+                1,
+                self._common_argv_prefix(normalized_actual, normalized_profile),
+            )
+            if score > family_score:
+                family_match = profile.profile_id
+                family_score = score
+        return family_match
 
     @staticmethod
     def _normalize_test_argv(arguments: list[str]) -> tuple[str, ...]:
@@ -573,6 +586,27 @@ class AgentRuntime:
         else:
             normalized[0] = executable
         return tuple(normalized)
+
+    @staticmethod
+    def _test_command_family(arguments: tuple[str, ...]) -> str | None:
+        if arguments[:3] == ("python", "-m", "pytest") or arguments[0].startswith(
+            "pytest"
+        ):
+            return "pytest"
+        if arguments[0] in {"tox", "nox"}:
+            return arguments[0]
+        return None
+
+    @staticmethod
+    def _common_argv_prefix(left: tuple[str, ...], right: tuple[str, ...]) -> int:
+        return next(
+            (
+                index
+                for index, pair in enumerate(zip(left, right, strict=False))
+                if pair[0] != pair[1]
+            ),
+            min(len(left), len(right)),
+        )
 
     @staticmethod
     def _mini_native_action_is_test(action: RepairAction) -> bool:
@@ -893,7 +927,7 @@ class AgentRuntime:
         ):
             return None
         return ToolResult(
-            success=result.returncode == 0,
+            success=True,
             output={"mini_native_bash_result": result.model_dump(mode="json")},
             duration_ms=result.duration_ms,
             truncated=result.truncated,
@@ -1014,7 +1048,11 @@ class AgentRuntime:
                     test_binding=test_binding,
                     already_claimed=True,
                 )
-                if not result.success and approval.status is ApprovalStatus.APPROVED:
+                if (
+                    not result.success
+                    and approval.status is ApprovalStatus.APPROVED
+                    and snapshot.mini_native_pending_action is None
+                ):
                     return self._fail(
                         ownership,
                         self._runs.get(run_id),
@@ -1164,7 +1202,11 @@ class AgentRuntime:
                 test_binding=test_binding,
                 recovered_result=recovered_result,
             )
-            if not result.success and approval.status is ApprovalStatus.APPROVED:
+            if (
+                not result.success
+                and approval.status is ApprovalStatus.APPROVED
+                and snapshot.mini_native_pending_action is None
+            ):
                 run = self._runs.get(run_id)
                 return self._fail(
                     ownership, run, result.error_message or "Approved tool failed"
@@ -1369,7 +1411,7 @@ class AgentRuntime:
                     approval_digest=approval.request_digest,
                 )
                 result = ToolResult(
-                    success=mini_native_result.returncode == 0,
+                    success=True,
                     output={
                         "mini_native_bash_result": mini_native_result.model_dump(
                             mode="json"
@@ -1446,11 +1488,20 @@ class AgentRuntime:
                     self._runs.get(run_id),
                     snapshot,
                 ).complete_managed_bash(mini_native_action, result)
+        if mini_native_action is not None and mini_native_result is not None:
+            self._mini_native_resume_host(
+                ownership,
+                self._runs.get(run_id),
+                snapshot,
+            ).ensure_bash_completed(
+                mini_native_action,
+                mini_native_result,
+                executed=approval.status is ApprovalStatus.APPROVED,
+            )
         if (
             approval.status is ApprovalStatus.APPROVED
             and mini_native_action is not None
             and mini_native_result is not None
-            and mini_native_result.returncode == 0
             and self._mini_native_action_is_write(mini_native_action)
         ):
             self._advance_mini_native_bash_source(
@@ -1618,7 +1669,12 @@ class AgentRuntime:
             run_id,
             approval.approval_id,
             checkpoint,
-            result_status="success" if result.success else "rejected",
+            result_status=(
+                "completed"
+                if mini_native_action is not None
+                and approval.status is ApprovalStatus.APPROVED
+                else ("success" if result.success else "rejected")
+            ),
             result_summary=(result.error_message or "Tool completed")[:500],
             authority=self._authority(ownership, run_id),
         )

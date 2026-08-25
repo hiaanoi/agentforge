@@ -233,6 +233,23 @@ class AgentForgeMiniNativeHost:
         self._append_bash_completed(action, result, executed=False)
         return result
 
+    def ensure_bash_completed(
+        self,
+        action: RepairAction,
+        result: RepairActionResult,
+        *,
+        executed: bool = True,
+    ) -> None:
+        """Backfill a completion event after recovering a durably saved result."""
+        action_id = str(action.action_id)
+        if any(
+            event.event_type is EventType.BASH_COMPLETED
+            and event.payload.get("action_id") == action_id
+            for event in self._events.list_for_run(action.run_id)
+        ):
+            return
+        self._append_bash_completed(action, result, executed=executed)
+
     async def _execute_bash(self, action: RepairAction) -> RepairActionResult:
         command = self._command(action)
         kind = classify_command(command)
@@ -256,32 +273,32 @@ class AgentForgeMiniNativeHost:
             self._pause(action, required)
         if kind is CommandKind.TEST:
             profile_id = self._test_profile_for_command(command)
-            if profile_id is not None:
-                outcome = await self._tools.execute(
-                    self._run,
-                    "run_tests",
-                    {"profile_id": profile_id},
-                    ownership=self._ownership,
+            managed_profile_id = profile_id or "__unmatched_bash_test__"
+            outcome = await self._tools.execute(
+                self._run,
+                "run_tests",
+                {"profile_id": managed_profile_id},
+                ownership=self._ownership,
+            )
+            if isinstance(outcome, ApprovalRequired):
+                self._pause(
+                    action,
+                    outcome,
+                    call=ToolCall(
+                        type="tool_call",
+                        call_id=str(action.action_id),
+                        tool="run_tests",
+                        arguments={"profile_id": managed_profile_id},
+                        reason="Run the bash test command through its registered profile",
+                    ),
                 )
-                if isinstance(outcome, ApprovalRequired):
-                    self._pause(
-                        action,
-                        outcome,
-                        call=ToolCall(
-                            type="tool_call",
-                            call_id=str(action.action_id),
-                            tool="run_tests",
-                            arguments={"profile_id": profile_id},
-                            reason="Run the bash test command through its registered profile",
-                        ),
-                    )
-                assert isinstance(outcome, ToolResult)
-                result = self.complete_managed_bash(action, outcome)
-                self._save_checkpoint(
-                    mini_native_pending_action=action,
-                    mini_native_pending_action_result=result,
-                )
-                return result
+            assert isinstance(outcome, ToolResult)
+            result = self.complete_managed_bash(action, outcome)
+            self._save_checkpoint(
+                mini_native_pending_action=action,
+                mini_native_pending_action_result=result,
+            )
+            return result
         result = await self._execute_environment(action)
         self._save_checkpoint(
             mini_native_pending_action=action,

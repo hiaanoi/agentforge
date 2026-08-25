@@ -29,14 +29,17 @@ class _BashProvider:
     name = "scripted"
     journal_identity = "scripted/mini-native-bash"
 
-    def __init__(self) -> None:
+    def __init__(self, commands: list[str] | None = None) -> None:
         self.requests: list[ModelRequest] = []
-        self._commands = [
-            "rg -n VALUE src/value.py",
-            "sed -i 's/VALUE = 0/VALUE = 2/' src/value.py",
-            "python -m pytest -q",
-            "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT",
-        ]
+        self._commands = list(
+            commands
+            or [
+                "rg -n VALUE src/value.py",
+                "sed -i 's/VALUE = 0/VALUE = 2/' src/value.py",
+                "python -m pytest -q",
+                "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT",
+            ]
+        )
 
     async def generate(self, request: ModelRequest) -> ModelResponse:
         self.requests.append(request.model_copy(deep=True))
@@ -88,6 +91,30 @@ class _FakeBashEnvironment:
             timed_out=False,
             duration_ms=1,
         )
+
+
+class _PartialWriteEnvironment(_FakeBashEnvironment):
+    async def execute(
+        self,
+        command: str,
+        *,
+        cwd: str,
+        timeout_seconds: float | None,
+    ) -> BashObservation:
+        observation = await super().execute(
+            command,
+            cwd=cwd,
+            timeout_seconds=timeout_seconds,
+        )
+        if command.startswith("sed -i "):
+            return BashObservation(
+                output="sed reported a late failure\n",
+                returncode=7,
+                exception_info=None,
+                timed_out=False,
+                duration_ms=observation.duration_ms,
+            )
+        return observation
 
 
 def _bash_request(
@@ -209,3 +236,115 @@ async def test_bash_runtime_approves_recovers_tests_and_publishes_without_replay
     assert [event.sequence_number for event in events] == list(
         range(1, len(events) + 1)
     )
+
+
+@pytest.mark.asyncio
+async def test_nonzero_approved_write_continues_with_observation_and_verified_source(
+    tmp_path: Path,
+) -> None:
+    request, workspace, _ = _bash_request(tmp_path)
+    provider = _BashProvider()
+    request = replace(request, provider=provider)
+    components = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    environment = _PartialWriteEnvironment(workspace)
+    components.runtime._mini_native_environment = environment
+    run = _create_product_run(request, workspace)
+
+    waiting = await components.runtime.execute(run.run_id)
+    [write_approval] = components.runtime.list_pending_approvals(run.run_id)
+    components.runtime.approve(write_approval.approval_id)
+
+    waiting = await components.runtime.resume(run.run_id)
+
+    assert waiting.status is RunStatus.WAITING_APPROVAL
+    [test_approval] = components.runtime.list_pending_approvals(run.run_id)
+    assert test_approval.tool_name == "run_tests"
+    assert '"returncode": 7' in str(provider.requests[-1].history[-1])
+    components.runtime.approve(test_approval.approval_id)
+
+    waiting = await components.runtime.resume(run.run_id)
+
+    assert waiting.status is RunStatus.WAITING_APPROVAL
+    [candidate_approval] = components.runtime.list_pending_approvals(run.run_id)
+    assert candidate_approval.tool_name == "publish_candidate_patch"
+
+
+@pytest.mark.asyncio
+async def test_nonexact_pytest_command_uses_managed_profile_not_environment(
+    tmp_path: Path,
+) -> None:
+    request, workspace, _ = _bash_request(tmp_path)
+    provider = _BashProvider(
+        [
+            "python -m pytest tests/test_value.py -q",
+            "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT",
+        ]
+    )
+    request = replace(request, provider=provider)
+    components = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    environment = _FakeBashEnvironment(workspace)
+    components.runtime._mini_native_environment = environment
+    run = _create_product_run(request, workspace)
+
+    waiting = await components.runtime.execute(run.run_id)
+
+    assert waiting.status is RunStatus.WAITING_APPROVAL
+    [approval] = components.runtime.list_pending_approvals(run.run_id)
+    assert approval.tool_name == "run_tests"
+    assert environment.commands == []
+
+
+@pytest.mark.asyncio
+async def test_claimed_bash_result_backfills_completion_event_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, workspace, _ = _bash_request(tmp_path)
+    components = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    environment = _FakeBashEnvironment(workspace)
+    components.runtime._mini_native_environment = environment
+    run = _create_product_run(request, workspace)
+
+    waiting = await components.runtime.execute(run.run_id)
+    [write_approval] = components.runtime.list_pending_approvals(run.run_id)
+    components.runtime.approve(write_approval.approval_id)
+    original = AgentForgeMiniNativeHost._append_bash_completed
+
+    def interrupt_before_completion_event(
+        self: AgentForgeMiniNativeHost, *args: object, **kwargs: object
+    ) -> None:
+        action = args[0]
+        if getattr(action, "arguments", {}).get("command", "").startswith("sed -i "):
+            raise RuntimeError("interrupt before bash completion event")
+        original(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        AgentForgeMiniNativeHost,
+        "_append_bash_completed",
+        interrupt_before_completion_event,
+    )
+    with pytest.raises(RuntimeError, match="interrupt before bash completion event"):
+        await components.runtime.resume(run.run_id)
+
+    monkeypatch.undo()
+    reopened = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    reopened.runtime._mini_native_environment = environment
+    waiting = await reopened.runtime.resume(run.run_id)
+
+    assert waiting.status is RunStatus.WAITING_APPROVAL
+    assert environment.commands.count("sed -i 's/VALUE = 0/VALUE = 2/' src/value.py") == 1
+    completed = [
+        event
+        for event in request.events.list_for_run(run.run_id)
+        if event.event_type is EventType.BASH_COMPLETED
+    ]
+    assert len(completed) == 2
+    assert len({event.payload["action_id"] for event in completed}) == 2
