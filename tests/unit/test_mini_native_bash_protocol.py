@@ -42,3 +42,5 @@ def test_instance_template_contains_frozen_workflow_sections():
     assert "## Command Execution Rules" in BASH_INSTANCE_TEMPLATE
     assert "<system_information>" in BASH_INSTANCE_TEMPLATE
     assert "{{task}}" in BASH_INSTANCE_TEMPLATE
+    assert "\n   Do not combine it with any other command." in BASH_INSTANCE_TEMPLATE
+    assert "\n  Do not combine it with any other command." in BASH_INSTANCE_TEMPLATE
