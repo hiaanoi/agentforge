@@ -66,6 +66,7 @@ class ModelResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: ModelOutput
+    model_call_id: UUID | None = None
     usage: ModelUsage | None = None
     provider: str = Field(min_length=1)
     model: str = Field(min_length=1)

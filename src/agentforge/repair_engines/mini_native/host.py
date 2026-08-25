@@ -35,8 +35,18 @@ class MiniNativeHost(Protocol):
     async def publish(self, run_id: UUID) -> CandidatePatchResult: ...
 
 
-def classify_action(arguments: dict[str, Any]) -> RepairActionKind:
+def classify_action(
+    arguments: dict[str, Any], *, tool_name: str | None = None
+) -> RepairActionKind:
     """Classify a mini-SWE action payload without executing it."""
+    registered_kind = {
+        "read_file": RepairActionKind.READ,
+        "edit_file": RepairActionKind.WRITE,
+        "write_file": RepairActionKind.WRITE,
+        "run_tests": RepairActionKind.TEST,
+    }.get(tool_name) if tool_name is not None else None
+    if registered_kind is not None:
+        return registered_kind
     raw = arguments.get("kind", arguments.get("action", arguments.get("type")))
     if isinstance(raw, str):
         try:

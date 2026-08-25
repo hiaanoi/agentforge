@@ -1,13 +1,13 @@
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
-
-import pytest
 
 from agentforge.application.bootstrap import ProductRuntimeDefinitionLoader
 from agentforge.application.config import ProductConfigLoader
-from agentforge.domain.enums import RunStatus
+from agentforge.domain.enums import EventType, RunStatus
+from agentforge.domain.models import Run
 from agentforge.evaluation.verified10_support import agentforge_config, agentforge_runtime
 from agentforge.repair_engines.models import RepairEngineKind
 from agentforge.runtime.engine import AgentRuntime
@@ -50,16 +50,26 @@ def test_runtime_definition_accepts_mini_native_engine(tmp_path: Path) -> None:
     assert definition.repair_engine is not RepairEngineKind.MINI_LINEAR
 
 
-def test_mini_native_does_not_fall_through_to_native_loop() -> None:
+def test_mini_native_dispatches_to_wired_loop() -> None:
     run_id = uuid4()
+    run = Run(run_id=run_id, task="repair with mini-native")
+    authority = SimpleNamespace(run_id=run_id)
+    ownership = SimpleNamespace(authority=authority)
+    get = Mock(return_value=run)
+    save = Mock()
+    append_event = Mock()
+    run_mini_native = AsyncMock(return_value=run)
     runtime = AgentRuntime.__new__(AgentRuntime)
     runtime._repair_engine = RepairEngineKind.MINI_NATIVE
-    runtime._runs = SimpleNamespace(
-        get=lambda requested_run_id: SimpleNamespace(
-            run_id=requested_run_id,
-            status=RunStatus.CREATED,
-        )
-    )
+    runtime._runs = SimpleNamespace(get=get, save=save)
+    runtime._append_event = append_event
+    runtime._run_mini_native = run_mini_native
 
-    with pytest.raises(RuntimeError, match="registered but not wired yet"):
-        asyncio.run(runtime._execute_owned(run_id, ownership=None))
+    dispatched = asyncio.run(runtime._execute_owned(run_id, ownership=ownership))
+
+    assert dispatched is run
+    assert run.status is RunStatus.RUNNING
+    get.assert_called_once_with(run_id)
+    save.assert_called_once_with(run, authority=authority)
+    append_event.assert_called_once_with(ownership, run_id, EventType.RUN_STARTED)
+    run_mini_native.assert_awaited_once_with(ownership, run)

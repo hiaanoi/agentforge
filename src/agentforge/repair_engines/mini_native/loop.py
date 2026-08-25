@@ -23,33 +23,32 @@ from agentforge.repair_engines.mini_native.host import (
     classify_action,
 )
 from agentforge.repair_engines.mini_native.vendor.loop import VendorRepairLoop
+from agentforge.tools.mutation.edit_file import EditFileArguments
+from agentforge.tools.repository.read_file import ReadFileArguments
+from agentforge.tools.testing.run_tests import RunTestsArguments
 
 _SYSTEM_PROMPT = "You are a helpful assistant that can interact with a computer to repair code."
 _TOOLS = [
     ToolSpec(
         name="read_file",
         description="Read a file from the candidate workspace",
-        input_schema={"type": "object", "properties": {"path": {"type": "string"}}},
+        input_schema=ReadFileArguments.model_json_schema(),
         risk_level=ToolRisk.READ,
         requires_approval=False,
     ),
     ToolSpec(
         name="edit_file",
         description="Edit a file in the candidate workspace",
-        input_schema={
-            "type": "object",
-            "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
-            "required": ["path", "content"],
-        },
-        risk_level=ToolRisk.DANGEROUS,
+        input_schema=EditFileArguments.model_json_schema(),
+        risk_level=ToolRisk.WRITE,
         requires_approval=True,
     ),
     ToolSpec(
         name="run_tests",
         description="Run focused tests in the candidate workspace",
-        input_schema={"type": "object", "properties": {"command": {"type": "string"}}},
+        input_schema=RunTestsArguments.model_json_schema(),
         risk_level=ToolRisk.DANGEROUS,
-        requires_approval=False,
+        requires_approval=True,
     ),
 ]
 
@@ -99,6 +98,7 @@ class MiniNativeRepairEngine:
                 run_id=run_id,
                 step=step,
                 working_directory=working_directory,
+                parent_model_call_id=response.model_call_id,
             )
             history.append(_action_history_item(action))
             if action.kind is RepairActionKind.FINAL and not last_test_passed:
@@ -138,21 +138,28 @@ class MiniNativeRepairEngine:
 
 
 def _to_repair_action(
-    action: ToolCall | FinalAnswer, *, run_id: UUID, step: int, working_directory: str
+    action: ToolCall | FinalAnswer,
+    *,
+    run_id: UUID,
+    step: int,
+    working_directory: str,
+    parent_model_call_id: UUID | None = None,
 ) -> RepairAction:
     if isinstance(action, FinalAnswer):
         return RepairAction(
             run_id=run_id,
+            parent_model_call_id=parent_model_call_id,
             tool_name="submit",
             working_directory=working_directory,
             kind=RepairActionKind.FINAL,
             arguments={"answer": action.answer},
         )
     arguments = dict(action.arguments)
-    kind = classify_action(arguments)
+    kind = classify_action(arguments, tool_name=action.tool)
     approval_key = f"mini-native-step-{step}" if kind is RepairActionKind.WRITE else None
     return RepairAction(
         run_id=run_id,
+        parent_model_call_id=parent_model_call_id,
         tool_name=action.tool,
         working_directory=working_directory,
         kind=kind,

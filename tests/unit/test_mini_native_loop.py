@@ -16,6 +16,8 @@ from agentforge.repair_engines.mini_native.vendor.context import (
     MAX_OBSERVATION_CHARS,
     compact_history,
 )
+from agentforge.tools.mutation.edit_file import EditFileArguments
+from agentforge.tools.testing.run_tests import RunTestsArguments
 
 
 class _FakeHost:
@@ -30,22 +32,32 @@ class _FakeHost:
             ToolCall(
                 type="tool_call",
                 tool="edit_file",
-                arguments={"path": "src/widget.py", "content": "first fix"},
+                arguments={
+                    "path": "src/widget.py",
+                    "old_text": "before",
+                    "new_text": "first fix",
+                    "expected_sha256": "a" * 64,
+                },
             ),
             ToolCall(
                 type="tool_call",
                 tool="run_tests",
-                arguments={"command": "pytest tests/unit/test_widget.py"},
+                arguments={"profile_id": "unit"},
             ),
             ToolCall(
                 type="tool_call",
                 tool="edit_file",
-                arguments={"path": "src/widget.py", "content": "second fix"},
+                arguments={
+                    "path": "src/widget.py",
+                    "old_text": "first fix",
+                    "new_text": "second fix",
+                    "expected_sha256": "b" * 64,
+                },
             ),
             ToolCall(
                 type="tool_call",
                 tool="run_tests",
-                arguments={"command": "pytest tests/unit/test_widget.py"},
+                arguments={"profile_id": "unit"},
             ),
             FinalAnswer(type="final", answer="submit the verified repair"),
         ]
@@ -107,6 +119,11 @@ async def test_mini_native_loop_retries_after_a_failed_test_before_submission() 
     assert result.candidate.published
     assert host.publish_calls == [run_id]
     assert host.actions[-1].kind is RepairActionKind.FINAL
+    tools = {tool.name: tool for tool in host.requests[0].tools}
+    assert tools["edit_file"].input_schema == EditFileArguments.model_json_schema()
+    assert tools["run_tests"].input_schema == RunTestsArguments.model_json_schema()
+    assert tools["edit_file"].requires_approval
+    assert tools["run_tests"].requires_approval
 
 
 @pytest.mark.asyncio
@@ -118,12 +135,17 @@ async def test_mini_native_loop_requires_a_new_passing_test_after_a_write() -> N
         ToolCall(
             type="tool_call",
             tool="run_tests",
-            arguments={"command": "pytest tests/unit/test_widget.py"},
+            arguments={"profile_id": "unit"},
         ),
         ToolCall(
             type="tool_call",
             tool="edit_file",
-            arguments={"path": "src/widget.py", "content": "unverified fix"},
+            arguments={
+                "path": "src/widget.py",
+                "old_text": "before",
+                "new_text": "unverified fix",
+                "expected_sha256": "a" * 64,
+            },
         ),
         FinalAnswer(type="final", answer="submit stale verification"),
     ]
@@ -192,15 +214,18 @@ async def test_mini_native_loop_keeps_raw_edit_secrets_out_of_next_model_request
             tool="edit_file",
             arguments={
                 "path": "src/widget.py",
-                "content": "x" * (MAX_OBSERVATION_CHARS * 2),
-                "api_key": "sk-live-secret-value",
-                "authorization": "Bearer bearer-secret-value",
+                "old_text": "before",
+                "new_text": (
+                    "sk-live-secret-value\nBearer bearer-secret-value\n"
+                    + "x" * (MAX_OBSERVATION_CHARS * 2)
+                ),
+                "expected_sha256": "a" * 64,
             },
         ),
         ToolCall(
             type="tool_call",
             tool="run_tests",
-            arguments={"command": "pytest tests/unit/test_widget.py"},
+            arguments={"profile_id": "unit"},
         ),
         FinalAnswer(type="final", answer="submit the verified repair"),
     ]

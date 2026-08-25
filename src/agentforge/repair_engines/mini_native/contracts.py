@@ -107,7 +107,7 @@ class MiniNativeState(BaseModel):
             return value
         data = dict(value)
         history = data.get("history", ())
-        data["history"] = tuple(_bound_history_item(item) for item in list(history)[-100:])
+        data["history"] = tuple(sanitize_history(list(history)))
         return data
 
 
@@ -151,6 +151,11 @@ def _bound_history_item(value: Any) -> JsonValue:
     return {"summary": encoded[:20_000]}
 
 
+def sanitize_history(history: list[JsonValue]) -> list[JsonValue]:
+    """Redact and bound generic AgentForge history before model reuse."""
+    return [_bound_history_item(item) for item in history[-100:]]
+
+
 def _action_id(action: RepairAction) -> UUID:
     from uuid import uuid5
 
@@ -169,4 +174,5 @@ __all__ = [
     "RepairAction",
     "RepairActionKind",
     "RepairActionResult",
+    "sanitize_history",
 ]

@@ -103,6 +103,7 @@ from agentforge.repair_engines.mini_native.agentforge_host import (
     AgentForgeMiniNativeHost,
     MiniNativeApprovalPaused,
 )
+from agentforge.repair_engines.mini_native.contracts import sanitize_history
 from agentforge.repair_engines.mini_native.loop import MiniNativeRepairEngine
 from agentforge.repair_engines.models import RepairEngineKind
 from agentforge.runtime.candidate_patch import CandidatePatchPublisher, CandidatePatchStore
@@ -366,7 +367,10 @@ class AgentRuntime:
             type="tool_call",
             call_id=f"candidate-patch-{run.run_id}",
             tool="publish_candidate_patch",
-            arguments={"run_id": str(run.run_id)},
+            arguments={
+                "run_id": str(run.run_id),
+                "manifest_digest": patch.manifest_digest,
+            },
             reason="Publish the submitted candidate patch after final approval",
         )
         return self._pause_for_approval(
@@ -449,6 +453,26 @@ class AgentRuntime:
             )
         except MiniNativeApprovalPaused:
             return self._runs.get(run.run_id)
+        except (ModelOutputError, ModelProviderError, ModelRequestError) as exc:
+            error_code = (
+                exc.code
+                if isinstance(exc, ModelRequestError)
+                else (
+                    ModelErrorCode.MODEL_OUTPUT_INVALID
+                    if isinstance(exc, ModelOutputError)
+                    else ModelErrorCode.MODEL_PROVIDER_ERROR
+                )
+            )
+            self._append_event(
+                ownership,
+                run.run_id,
+                EventType.MODEL_FAILED,
+                {
+                    "step_number": run.current_step,
+                    "error_type": error_code.value,
+                },
+            )
+            return self._fail_model_generation(ownership, run, error_code, str(exc))
         if result.submitted:
             return self._complete_mini_linear_publish(ownership, self._runs.get(run.run_id))
         return self._fail(
@@ -716,7 +740,9 @@ class AgentRuntime:
                     raise ResumeNotAllowedError("Consumed decision could not continue")
                 run = self._runs.get(run_id)
                 if approval.tool_name == "publish_candidate_patch":
-                    return self._complete_mini_linear_publish(ownership, run)
+                    return self._finish_candidate_publication(
+                        ownership, run, approval, result=result
+                    )
                 ready = self._load_snapshot(
                     approvals.get(approval.approval_id), ResumePhase.READY_FOR_MODEL
                 )
@@ -778,7 +804,7 @@ class AgentRuntime:
                     raise ResumeNotAllowedError("Consumed approval Run is not recoverable")
                 run = self._runs.get(run_id)
                 if approval.tool_name == "publish_candidate_patch":
-                    return self._complete_mini_linear_publish(ownership, run)
+                    return self._finish_candidate_publication(ownership, run, approval)
                 if self._repairs is not None:
                     repair_state = self._repairs.state(run_id)
                     if repair_state.terminal:
@@ -855,7 +881,9 @@ class AgentRuntime:
                 raise ResumeNotAllowedError("Consumed decision could not continue")
             run = self._runs.get(run_id)
             if approval.tool_name == "publish_candidate_patch":
-                return self._complete_mini_linear_publish(ownership, run)
+                return self._finish_candidate_publication(
+                    ownership, run, approval, result=result
+                )
             if self._repairs is not None:
                 repair_state = self._repairs.state(run_id)
                 if repair_state.terminal:
@@ -905,7 +933,7 @@ class AgentRuntime:
             return await self._run_mini_native(
                 ownership,
                 run,
-                list(snapshot.history),
+                sanitize_history(snapshot.history),
                 latest_test_passed,
             )
         return await self._run_loop(
@@ -936,6 +964,25 @@ class AgentRuntime:
             {"final_output": run.final_output},
         )
         return run
+
+    def _finish_candidate_publication(
+        self,
+        ownership: RunOwnership,
+        run: Run,
+        approval: ApprovalRequest,
+        *,
+        result: ToolResult | None = None,
+    ) -> Run:
+        successful = approval.status is ApprovalStatus.APPROVED and (
+            result.success if result is not None else approval.result_status == "success"
+        )
+        if not successful:
+            return self._fail(
+                ownership,
+                run,
+                "Candidate patch publication was rejected or failed",
+            )
+        return self._complete_mini_linear_publish(ownership, run)
 
     async def _consume_decision(
         self,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -71,8 +70,10 @@ class AgentForgeMiniNativeHost:
     async def generate(self, request: ModelRequest) -> ModelResponse:
         self._run.current_step += 1
         self._runs.save(self._run, authority=self._ownership.authority)
-        bound_request = request.model_copy(update={"step_number": self._run.current_step})
         model_call_id = uuid4()
+        bound_request = request.model_copy(
+            update={"step_number": self._run.current_step, "model_call_id": model_call_id}
+        )
         request_digest = ModelWorkflow.request_digest(bound_request)
         audit_payload: dict[str, JsonValue] = {
             "step_number": self._run.current_step,
@@ -86,6 +87,7 @@ class AgentForgeMiniNativeHost:
             )
         else:
             response = await self._provider.generate(bound_request)
+        response = response.model_copy(update={"model_call_id": model_call_id})
         self._append_event(
             EventType.MODEL_RESPONDED,
             {
@@ -144,22 +146,24 @@ class AgentForgeMiniNativeHost:
             raise ValueError("Candidate publication belongs to another Run")
         patch = self._candidate_publisher.capture(Path(self._workspace))
         self._candidate_store.save(str(run_id), patch)
-        digest = hashlib.sha256(
-            json.dumps(
-                [entry.target_path for entry in patch.entries],
-                separators=(",", ":"),
-                sort_keys=True,
-            ).encode("utf-8")
-        ).hexdigest()
-        return CandidatePatchResult(run_id=run_id, published=False, patch_digest=digest)
+        return CandidatePatchResult(
+            run_id=run_id,
+            published=False,
+            patch_digest=patch.manifest_digest,
+        )
 
     async def _queue_candidate_publication(self, action: RepairAction) -> RepairActionResult:
-        await self.publish(action.run_id)
+        candidate = await self.publish(action.run_id)
+        if candidate.patch_digest is None:
+            raise ValueError("Candidate patch publication is missing its manifest digest")
         call = ToolCall(
             type="tool_call",
             call_id=str(action.action_id),
             tool="publish_candidate_patch",
-            arguments={"run_id": str(action.run_id)},
+            arguments={
+                "run_id": str(action.run_id),
+                "manifest_digest": candidate.patch_digest,
+            },
             reason="Publish the mini-native candidate patch after approval",
         )
         outcome = await self._tools.execute(

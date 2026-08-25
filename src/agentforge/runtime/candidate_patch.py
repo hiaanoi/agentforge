@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from agentforge.domain.enums import ToolCapability, ToolErrorCode, ToolRisk
 from agentforge.domain.errors import ToolExecutionError
@@ -31,6 +31,19 @@ class CandidatePatchEntry:
 class CandidatePatch:
     entries: tuple[CandidatePatchEntry, ...]
 
+    @property
+    def manifest_digest(self) -> str:
+        payload = [
+            {
+                "target_path": entry.target_path,
+                "data_sha256": hashlib.sha256(entry.data).hexdigest(),
+                "plan": entry.plan.model_dump(mode="json"),
+            }
+            for entry in self.entries
+        ]
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
 
 class CandidatePatchStore:
     _FILENAME = "candidate-patch.json"
@@ -46,6 +59,7 @@ class CandidatePatchStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "schema_version": 1,
+            "manifest_digest": patch.manifest_digest,
             "entries": [
                 {
                     "target_path": entry.target_path,
@@ -83,6 +97,9 @@ class CandidatePatchStore:
                 )
                 for item in payload["entries"]
             )
+            patch = CandidatePatch(entries=entries)
+            if payload.get("manifest_digest") != patch.manifest_digest:
+                raise ValueError
         except (KeyError, TypeError, UnicodeDecodeError, ValueError) as exc:
             raise ValueError("Candidate patch manifest is invalid") from exc
         for entry in entries:
@@ -90,13 +107,14 @@ class CandidatePatchStore:
                 raise ValueError("Candidate patch manifest target does not match its plan")
             if hashlib.sha256(entry.data).hexdigest() != entry.plan.expected_after_sha256:
                 raise ValueError("Candidate patch manifest bytes do not match its plan")
-        return CandidatePatch(entries=entries)
+        return patch
 
 
 class CandidatePatchPublishArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     run_id: UUID
+    manifest_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class CandidatePatchPublishTool:
@@ -122,6 +140,11 @@ class CandidatePatchPublishTool:
     def execute(self, arguments: BaseModel) -> ToolResult:
         parsed = CandidatePatchPublishArguments.model_validate(arguments)
         patch = self._store.load(self._store.path_for(parsed.run_id))
+        if patch.manifest_digest != parsed.manifest_digest:
+            raise ToolExecutionError(
+                ToolErrorCode.APPROVAL_CONFLICT,
+                "Candidate patch manifest does not match the approved digest",
+            )
         self._publisher.publish(patch)
         return ToolResult(
             success=True,
@@ -208,9 +231,32 @@ class CandidatePatchPublisher:
         )
 
     def publish(self, patch: CandidatePatch) -> None:
+        self._validate_patch(patch)
         for entry in patch.entries:
             target = self._security.resolve_target(entry.target_path)
             self._writer.apply(target, entry.data, entry.plan)
+
+    def _validate_patch(self, patch: CandidatePatch) -> None:
+        seen: set[str] = set()
+        for entry in patch.entries:
+            if self._is_excluded(entry.target_path):
+                raise ToolExecutionError(
+                    ToolErrorCode.POLICY_DENIED,
+                    "Candidate patch contains an excluded path",
+                )
+            if (
+                entry.target_path in seen
+                or entry.target_path != entry.plan.target_path
+                or len(entry.data) != entry.plan.bytes_written
+                or hashlib.sha256(entry.data).hexdigest()
+                != entry.plan.expected_after_sha256
+            ):
+                raise ToolExecutionError(
+                    ToolErrorCode.MUTATION_HASH_MISMATCH,
+                    "Candidate patch manifest is invalid",
+                )
+            seen.add(entry.target_path)
+            self._security.resolve_target(entry.target_path)
 
     @staticmethod
     def _changed_paths(candidate: Path) -> list[str]:

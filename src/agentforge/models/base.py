@@ -14,6 +14,7 @@ class ModelRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     run_id: UUID | None = None
+    model_call_id: UUID | None = None
     task: str = Field(min_length=1)
     step_number: int = Field(gt=0)
     instructions: str | None = None

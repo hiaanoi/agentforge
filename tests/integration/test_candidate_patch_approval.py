@@ -35,12 +35,18 @@ from agentforge.tools.registry import ToolRegistry
 class PublishThenFinishModel:
     name = "test-model"
 
+    def __init__(self, manifest_digest: str) -> None:
+        self._manifest_digest = manifest_digest
+
     async def generate(self, request: ModelRequest) -> object:
         if request.step_number == 1:
             return {
                 "type": "tool_call",
                 "tool": "publish_candidate_patch",
-                "arguments": {"run_id": str(request.run_id)},
+                "arguments": {
+                    "run_id": str(request.run_id),
+                    "manifest_digest": self._manifest_digest,
+                },
             }
         return {"type": "final", "answer": "candidate patch was published"}
 
@@ -103,9 +109,14 @@ async def test_final_candidate_patch_pauses_until_approval_then_publishes(
     )
     publisher = CandidatePatchPublisher(canonical_root=canonical, security=security)
     store = CandidatePatchStore(canonical)
-    runtime, database = _runtime(canonical, CandidatePatchPublishTool(publisher, store))
+    patch = publisher.capture(candidate)
+    runtime, database = _runtime(
+        canonical,
+        CandidatePatchPublishTool(publisher, store),
+        model=PublishThenFinishModel(patch.manifest_digest),
+    )
     run = runtime.create_run("publish candidate", max_steps=2)
-    store.save(str(run.run_id), publisher.capture(candidate))
+    store.save(str(run.run_id), patch)
 
     waiting = await runtime.execute(run.run_id)
 
@@ -216,6 +227,38 @@ async def test_mini_linear_final_patch_publishes_after_approval_and_resume(
 
 
 @pytest.mark.asyncio
+async def test_mini_linear_rejected_publish_does_not_complete_or_mutate_canonical(
+    tmp_path: Path,
+) -> None:
+    canonical, _ = _git_workspaces(tmp_path)
+    security = MutationSecurityPolicy(
+        WorkspacePathResolver(canonical), SensitiveFilePolicy(), MutationLimits()
+    )
+    publisher = CandidatePatchPublisher(canonical_root=canonical, security=security)
+    store = CandidatePatchStore(canonical)
+    runtime, database = _runtime(
+        canonical,
+        CandidatePatchPublishTool(publisher, store),
+        model=CandidateThenSubmitModel(),
+        repair_engine=RepairEngineKind.MINI_LINEAR,
+        candidate_shell_factory=WriteCandidateShell,
+        candidate_publisher=publisher,
+        candidate_store=store,
+    )
+    run = runtime.create_run("reject candidate publication", max_steps=4)
+
+    waiting = await runtime.execute(run.run_id)
+    approval = runtime.list_pending_approvals(run.run_id)[0]
+    runtime.reject(approval.approval_id)
+    rejected = await runtime.resume(run.run_id)
+
+    assert waiting.status is RunStatus.WAITING_APPROVAL
+    assert rejected.status is RunStatus.FAILED
+    assert (canonical / "src" / "module.py").read_text(encoding="utf-8") == "value = 1\n"
+    database.close()
+
+
+@pytest.mark.asyncio
 async def test_mini_linear_publish_approval_terminalizes_string_bound_engine(
     tmp_path: Path,
 ) -> None:
@@ -296,7 +339,7 @@ def _runtime(
         run_repository=runs,
         event_repository=events,
         checkpoint_repository=CheckpointRepository(database),
-        model_provider=model or PublishThenFinishModel(),
+        model_provider=model or CandidateThenSubmitModel(),
         tool_executor=ToolExecutor(
             ToolRegistry([tool]),
             PolicyEngine(WorkspacePathResolver(canonical), SensitiveFilePolicy()),

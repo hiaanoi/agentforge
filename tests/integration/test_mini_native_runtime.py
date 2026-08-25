@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -11,18 +12,22 @@ from uuid import uuid4
 import pytest
 
 from agentforge.application.contracts import ProfilePurpose
+from agentforge.application.product_workspace import ProductWorkspaceCapture
+from agentforge.application.run_creation import RunCreationWorkflow, StartRun
 from agentforge.application.runtime_factory import RuntimeAssemblyRequest, RuntimeComponentFactory
 from agentforge.context.models import ContextPolicy
 from agentforge.domain.enums import EventType, ProcessExecutionStatus, RunStatus
+from agentforge.domain.models import Run
 from agentforge.domain.repair import BudgetProfile, RepairDifficulty, RepairTaskPolicy
 from agentforge.models.base import ModelRequest, parse_model_output
-from agentforge.models.domain import ModelBudget, ModelResponse
+from agentforge.models.domain import ModelBudget, ModelErrorCode, ModelResponse
+from agentforge.models.errors import ModelRequestError
 from agentforge.persistence.database import Database
 from agentforge.persistence.legacy_evaluator import LegacyEvaluatorEventRepository
 from agentforge.persistence.profile_trust import ProfileKernel
 from agentforge.persistence.repair_workflow import RepairWorkflow
+from agentforge.persistence.source_revisions import DIGEST_ALGORITHM_VERSION
 from agentforge.repair_engines.models import RepairEngineKind
-from agentforge.runtime.mutations import EvaluatorOnlyUnboundSourcePolicy
 from agentforge.tools.paths import WorkspacePathResolver
 from agentforge.tools.testing.profiles import TestProfileDefinition as ProfileDefinition
 from agentforge.tools.testing.profiles import TestProfileRegistry as ProfileRegistry
@@ -34,6 +39,8 @@ class _ScriptedProvider:
 
     def __init__(self, target_sha: str) -> None:
         self._target_sha = target_sha
+        self.requests: list[ModelRequest] = []
+        first_revision = b"VALUE = 1\n# sk-live-secret-value\n"
         self._responses = [
             {"type": "tool_call", "tool": "read_file", "arguments": {"path": "src/value.py"}},
             {
@@ -42,7 +49,7 @@ class _ScriptedProvider:
                 "arguments": {
                     "path": "src/value.py",
                     "old_text": "VALUE = 0\n",
-                    "new_text": "VALUE = 1\n",
+                    "new_text": first_revision.decode("utf-8"),
                     "expected_sha256": target_sha,
                 },
             },
@@ -52,9 +59,9 @@ class _ScriptedProvider:
                 "tool": "edit_file",
                 "arguments": {
                     "path": "src/value.py",
-                    "old_text": "VALUE = 1\n",
+                    "old_text": first_revision.decode("utf-8"),
                     "new_text": "VALUE = 2\n",
-                    "expected_sha256": hashlib.sha256(b"VALUE = 1\n").hexdigest(),
+                    "expected_sha256": hashlib.sha256(first_revision).hexdigest(),
                 },
             },
             {"type": "tool_call", "tool": "run_tests", "arguments": {"profile_id": "visible"}},
@@ -62,13 +69,26 @@ class _ScriptedProvider:
         ]
 
     async def generate(self, request: ModelRequest) -> ModelResponse:
-        del request
+        self.requests.append(request.model_copy(deep=True))
         return ModelResponse(
             action=parse_model_output(self._responses.pop(0)),
             provider=self.name,
             model="mini-native",
             duration_ms=0,
             attempt_count=1,
+        )
+
+
+class _FailingProvider:
+    name = "failing"
+    journal_identity = "failing/mini-native"
+
+    async def generate(self, request: ModelRequest) -> ModelResponse:
+        del request
+        raise ModelRequestError(
+            ModelErrorCode.MODEL_BAD_REQUEST,
+            "safe nonretryable request failure",
+            retryable=False,
         )
 
 
@@ -176,6 +196,42 @@ def _request(tmp_path: Path) -> tuple[RuntimeAssemblyRequest, Path]:
     ), workspace
 
 
+def _create_product_run(request: RuntimeAssemblyRequest, workspace: Path) -> Run:
+    command_id = uuid4()
+    prepared = ProductWorkspaceCapture().capture(
+        workspace,
+        task_id=request.policy.task_id,
+        command_id=command_id,
+    )
+    git_head = subprocess.run(
+        ("git", "rev-parse", "HEAD"),
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return RunCreationWorkflow(request.database).create(
+        StartRun(
+            command_id=command_id,
+            task="repair",
+            max_steps=10,
+            max_tool_calls=10,
+            model_provider=request.provider.name,
+            model_budget=request.model_budget,
+            workspace_root_identity=str(workspace.resolve()),
+            git_head=git_head,
+            initial_source_digest=prepared.source_digest,
+            digest_algorithm_version=DIGEST_ALGORITHM_VERSION,
+            config_digest="c" * 64,
+            profile_digest="d" * 64,
+            repair_policy=request.policy,
+            baseline_id=prepared.baseline.baseline_id,
+            baseline_digest=prepared.baseline.root_digest,
+        ),
+        prepared_workspace=prepared,
+    ).run
+
+
 @pytest.mark.asyncio
 async def test_mini_native_routes_read_write_test_and_publish_through_runtime(
     tmp_path: Path,
@@ -185,10 +241,7 @@ async def test_mini_native_routes_read_write_test_and_publish_through_runtime(
     components = RuntimeComponentFactory().build(
         replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
     )
-    components.mutation_coordinator._source_policy = EvaluatorOnlyUnboundSourcePolicy()
-    components.runtime._tools._repair_guard = None
-    components.runtime._repairs = None
-    run = components.runtime.create_run("repair", max_steps=10)
+    run = _create_product_run(request, workspace)
 
     waiting = await components.runtime.execute(run.run_id)
 
@@ -238,6 +291,9 @@ async def test_mini_native_routes_read_write_test_and_publish_through_runtime(
     assert completed.status is RunStatus.COMPLETED
     assert (workspace / "src" / "value.py").read_bytes() == b"VALUE = 2\n"
     assert len(components.mutation_coordinator.list_executions(run.run_id)) == 2
+    repair_state = request.repair_workflow.get_state(run.run_id)
+    assert repair_state.edit_attempts_used == 2
+    assert repair_state.test_runs_used == 2
     events = request.events.list_for_run(run.run_id)
     assert {
         EventType.MODEL_REQUESTED,
@@ -266,13 +322,38 @@ async def test_mini_native_routes_read_write_test_and_publish_through_runtime(
     assert [event.payload["model_call_id"] for event in model_requested] == [
         event.payload["model_call_id"] for event in model_responded
     ]
+    assert [str(model_request.model_call_id) for model_request in request.provider.requests] == [
+        event.payload["model_call_id"] for event in model_requested
+    ]
     assert all(
         isinstance(event.payload["request_digest"], str)
         and len(event.payload["request_digest"]) == 64
         and "repair" not in event.model_dump_json()
         for event in (*model_requested, *model_responded)
     )
+    assert "sk-live-secret-value" not in json.dumps(request.provider.requests[2].history)
     candidate = components.runtime._candidate_store.load(
         components.runtime._candidate_store.path_for(run.run_id)
     )
     assert [entry.target_path for entry in candidate.entries] == ["src/value.py"]
+
+
+@pytest.mark.asyncio
+async def test_mini_native_model_failure_terminalizes_run_and_audit_events(
+    tmp_path: Path,
+) -> None:
+    request, workspace = _request(tmp_path)
+    request = replace(request, provider=_FailingProvider())
+    components = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    run = _create_product_run(request, workspace)
+
+    failed = await components.runtime.execute(run.run_id)
+
+    assert failed.status is RunStatus.FAILED
+    assert request.repair_workflow.get_state(run.run_id).terminal
+    event_types = [event.event_type for event in request.events.list_for_run(run.run_id)]
+    assert EventType.MODEL_REQUESTED in event_types
+    assert EventType.MODEL_FAILED in event_types
+    assert EventType.RUN_FAILED in event_types

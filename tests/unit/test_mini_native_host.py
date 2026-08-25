@@ -32,6 +32,31 @@ def test_action_classification(arguments: dict[str, object], expected: RepairAct
     assert classify_action(arguments) is expected
 
 
+@pytest.mark.parametrize(
+    ("tool_name", "arguments", "expected"),
+    [
+        ("read_file", {"path": "src/app.py"}, RepairActionKind.READ),
+        (
+            "edit_file",
+            {
+                "path": "src/app.py",
+                "old_text": "before",
+                "new_text": "after",
+                "expected_sha256": "a" * 64,
+            },
+            RepairActionKind.WRITE,
+        ),
+        ("run_tests", {"profile_id": "unit"}, RepairActionKind.TEST),
+    ],
+)
+def test_registered_tool_identity_drives_action_classification(
+    tool_name: str,
+    arguments: dict[str, object],
+    expected: RepairActionKind,
+) -> None:
+    assert classify_action(arguments, tool_name=tool_name) is expected
+
+
 def test_write_requires_non_empty_approval_key() -> None:
     with pytest.raises(ValidationError):
         RepairAction(

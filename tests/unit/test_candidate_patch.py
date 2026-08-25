@@ -1,3 +1,4 @@
+import hashlib
 import shutil
 import subprocess
 from pathlib import Path
@@ -6,8 +7,11 @@ import pytest
 
 from agentforge.domain.enums import ToolCapability, ToolErrorCode
 from agentforge.domain.errors import ToolExecutionError
+from agentforge.domain.mutations import MutationPlan
 from agentforge.policy.sensitive import SensitiveFilePolicy
 from agentforge.runtime.candidate_patch import (
+    CandidatePatch,
+    CandidatePatchEntry,
     CandidatePatchPublisher,
     CandidatePatchPublishTool,
     CandidatePatchStore,
@@ -81,11 +85,15 @@ def test_candidate_patch_publish_tool_reads_saved_manifest_by_run_id(tmp_path: P
     canonical, candidate, publisher = _candidate_and_publisher(tmp_path)
     (candidate / "src" / "module.py").write_text("value = 2\n", encoding="utf-8")
     store = CandidatePatchStore(canonical)
-    store.save("00000000-0000-0000-0000-000000000001", publisher.capture(candidate))
+    patch = publisher.capture(candidate)
+    store.save("00000000-0000-0000-0000-000000000001", patch)
     tool = CandidatePatchPublishTool(publisher, store)
 
     arguments = tool.input_model.model_validate(
-        {"run_id": "00000000-0000-0000-0000-000000000001"}
+        {
+            "run_id": "00000000-0000-0000-0000-000000000001",
+            "manifest_digest": patch.manifest_digest,
+        }
     )
     result = tool.execute(arguments)
 
@@ -94,6 +102,64 @@ def test_candidate_patch_publish_tool_reads_saved_manifest_by_run_id(tmp_path: P
     assert result.success is True
     assert result.output == {"entries": 1, "status": "published"}
     assert (canonical / "src" / "module.py").read_text(encoding="utf-8") == "value = 2\n"
+
+
+def test_candidate_patch_publish_rejects_unapproved_manifest_digest(tmp_path: Path) -> None:
+    canonical, candidate, publisher = _candidate_and_publisher(tmp_path)
+    (candidate / "src" / "module.py").write_text("value = 2\n", encoding="utf-8")
+    patch = publisher.capture(candidate)
+    store = CandidatePatchStore(canonical)
+    store.save("00000000-0000-0000-0000-000000000002", patch)
+    tool = CandidatePatchPublishTool(publisher, store)
+    arguments = tool.input_model.model_validate(
+        {
+            "run_id": "00000000-0000-0000-0000-000000000002",
+            "manifest_digest": "f" * 64,
+        }
+    )
+
+    with pytest.raises(ToolExecutionError) as raised:
+        tool.execute(arguments)
+
+    assert raised.value.code is ToolErrorCode.APPROVAL_CONFLICT
+    assert (canonical / "src" / "module.py").read_text(encoding="utf-8") == "value = 1\n"
+
+
+def test_candidate_patch_publish_revalidates_excluded_paths(tmp_path: Path) -> None:
+    canonical, _, _ = _candidate_and_publisher(tmp_path)
+    publisher = CandidatePatchPublisher(
+        canonical_root=canonical,
+        security=MutationSecurityPolicy(
+            WorkspacePathResolver(canonical),
+            SensitiveFilePolicy(),
+            MutationLimits(),
+        ),
+        excluded_path_prefixes=(".agentforge",),
+    )
+    data = b'{"private":true}\n'
+    path = ".agentforge/runtime-config.json"
+    patch = CandidatePatch(
+        entries=(
+            CandidatePatchEntry(
+                target_path=path,
+                data=data,
+                plan=MutationPlan(
+                    tool_name="publish_candidate_patch",
+                    target_path=path,
+                    target_existed=False,
+                    before_sha256=None,
+                    expected_after_sha256=hashlib.sha256(data).hexdigest(),
+                    bytes_written=len(data),
+                ),
+            ),
+        )
+    )
+
+    with pytest.raises(ToolExecutionError) as raised:
+        publisher.publish(patch)
+
+    assert raised.value.code is ToolErrorCode.POLICY_DENIED
+    assert not (canonical / path).exists()
 
 
 def _git(root: Path, *arguments: str) -> None:
