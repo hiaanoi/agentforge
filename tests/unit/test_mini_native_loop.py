@@ -1,3 +1,4 @@
+import json
 from uuid import UUID
 
 import pytest
@@ -10,6 +11,10 @@ from agentforge.repair_engines.mini_native.contracts import (
     RepairAction,
     RepairActionKind,
     RepairActionResult,
+)
+from agentforge.repair_engines.mini_native.vendor.context import (
+    MAX_OBSERVATION_CHARS,
+    compact_history,
 )
 
 
@@ -60,7 +65,11 @@ class _FakeHost:
         if self._fail_first_test and action.kind is RepairActionKind.TEST and len(
             [item for item in self.actions if item.kind is RepairActionKind.TEST]
         ) == 1:
-            return RepairActionResult(returncode=1, stdout="FAILED: expected 2, got 1", duration_ms=2)
+            return RepairActionResult(
+                returncode=1,
+                stdout="FAILED: expected 2, got 1",
+                duration_ms=2,
+            )
         return RepairActionResult(returncode=0, stdout="ok", duration_ms=2)
 
     async def checkpoint(self, state: MiniNativeState) -> None:
@@ -128,3 +137,63 @@ async def test_mini_native_loop_requires_a_new_passing_test_after_a_write() -> N
         )
 
     assert not host.publish_calls
+
+
+def test_vendor_context_redacts_and_bounds_tool_call_payloads() -> None:
+    oversized_content = "x" * (MAX_OBSERVATION_CHARS * 2)
+    compacted = compact_history(
+        [
+            {
+                "kind": "TOOL_CALL",
+                "payload": {
+                    "arguments": {
+                        "api_key": "sk-live-secret-value",
+                        "authorization": "Bearer bearer-secret-value",
+                        "content": oversized_content,
+                    }
+                },
+            }
+        ]
+    )
+
+    encoded = json.dumps(compacted)
+    assert "sk-live-secret-value" not in encoded
+    assert "bearer-secret-value" not in encoded
+    assert len(json.dumps(compacted[0]["payload"])) <= MAX_OBSERVATION_CHARS
+
+
+@pytest.mark.asyncio
+async def test_mini_native_loop_keeps_raw_edit_secrets_out_of_next_model_request() -> None:
+    from agentforge.repair_engines.mini_native.loop import MiniNativeRepairEngine
+
+    host = _FakeHost(fail_first_test=False)
+    host._responses = [
+        ToolCall(
+            type="tool_call",
+            tool="edit_file",
+            arguments={
+                "path": "src/widget.py",
+                "content": "x" * (MAX_OBSERVATION_CHARS * 2),
+                "api_key": "sk-live-secret-value",
+                "authorization": "Bearer bearer-secret-value",
+            },
+        ),
+        ToolCall(
+            type="tool_call",
+            tool="run_tests",
+            arguments={"command": "pytest tests/unit/test_widget.py"},
+        ),
+        FinalAnswer(type="final", answer="submit the verified repair"),
+    ]
+
+    await MiniNativeRepairEngine(host).run(
+        run_id=UUID("00000000-0000-0000-0000-000000000125"),
+        task="Repair widget behavior",
+        max_steps=3,
+        working_directory=".",
+    )
+
+    next_request_history = json.dumps(host.requests[1].history)
+    assert "sk-live-secret-value" not in next_request_history
+    assert "bearer-secret-value" not in next_request_history
+    assert len(json.dumps(host.requests[1].history[0]["payload"])) <= MAX_OBSERVATION_CHARS

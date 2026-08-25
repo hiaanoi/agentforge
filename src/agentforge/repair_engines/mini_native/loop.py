@@ -17,7 +17,11 @@ from agentforge.repair_engines.mini_native.contracts import (
     RepairActionKind,
     RepairActionResult,
 )
-from agentforge.repair_engines.mini_native.host import MiniNativeHost, classify_action
+from agentforge.repair_engines.mini_native.host import (
+    MiniNativeHost,
+    action_argument_summary,
+    classify_action,
+)
 from agentforge.repair_engines.mini_native.vendor.loop import VendorRepairLoop
 
 _SYSTEM_PROMPT = "You are a helpful assistant that can interact with a computer to repair code."
@@ -156,7 +160,11 @@ def _action_history_item(action: RepairAction) -> JsonValue:
         JsonValue,
         {
             "kind": "TOOL_CALL",
-            "payload": action.model_dump(mode="json"),
+            "payload": {
+                "tool_name": action.tool_name,
+                "kind": action.kind.value,
+                "arguments": action_argument_summary(action.arguments),
+            },
             "call_id": str(action.action_id),
         },
     )
