@@ -775,11 +775,18 @@ class AgentRuntime:
                     step_number=checkpoint.step_number,
                 )
                 if snapshot.resume_phase is ResumePhase.READY_FOR_MODEL:
+                    last_test_passed = (
+                        snapshot.mini_native_last_test_passed
+                        or (
+                            snapshot.last_test_result is not None
+                            and snapshot.last_test_result.success
+                        )
+                    )
                     return await self._run_mini_native(
                         ownership,
                         run,
                         sanitize_history(snapshot.history),
-                        snapshot.mini_native_last_test_passed,
+                        last_test_passed,
                         snapshot.mini_native_pending_action,
                         snapshot.provider_usage_available,
                         snapshot.last_provider_metadata,
@@ -1027,9 +1034,11 @@ class AgentRuntime:
     ) -> Run:
         if self._repair_engine is RepairEngineKind.MINI_NATIVE:
             latest_test_passed = (
-                snapshot.test_execution_state is ProcessExecutionStatus.COMPLETED
-                and snapshot.last_test_result is not None
-                and snapshot.last_test_result.success
+                snapshot.mini_native_last_test_passed
+                or (
+                    snapshot.last_test_result is not None
+                    and snapshot.last_test_result.success
+                )
             )
             return await self._run_mini_native(
                 ownership,
