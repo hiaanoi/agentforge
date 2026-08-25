@@ -6,9 +6,11 @@ from uuid import uuid4
 
 import pytest
 
-from agentforge.application.run_commands import ResumeRun
+from agentforge.application.run_commands import ResumeRecoveryChoice, ResumeRun
 from agentforge.application.runtime_factory import RuntimeComponentFactory
 from agentforge.domain.enums import EventType, RunStatus
+from agentforge.models.base import FinalAnswer, ModelRequest
+from agentforge.models.domain import ModelResponse
 from agentforge.repair_engines.mini_native.agentforge_host import AgentForgeMiniNativeHost
 from agentforge.repair_engines.models import RepairEngineKind
 from tests.integration.test_mini_native_runtime import _create_product_run, _request
@@ -48,6 +50,105 @@ async def test_mini_native_resumes_a_durably_saved_response_without_replaying_th
     assert [event.sequence_number for event in events] == list(
         range(1, len(events) + 1)
     )
+
+
+@pytest.mark.asyncio
+async def test_product_resume_command_continues_a_completed_mini_native_checkpoint(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, workspace = _request(tmp_path)
+    components = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    run = _create_product_run(request, workspace)
+    original = AgentForgeMiniNativeHost.checkpoint
+
+    async def interrupt_after_checkpoint(
+        self: AgentForgeMiniNativeHost, *args: Any, **kwargs: Any
+    ) -> None:
+        await original(self, *args, **kwargs)
+        raise RuntimeError("interrupt after completed checkpoint")
+
+    monkeypatch.setattr(AgentForgeMiniNativeHost, "checkpoint", interrupt_after_checkpoint)
+    with pytest.raises(RuntimeError, match="interrupt after completed checkpoint"):
+        await components.runtime.execute(run.run_id)
+
+    monkeypatch.undo()
+    reopened = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    outcome = await reopened.runtime.resume(ResumeRun(command_id=uuid4(), run_id=run.run_id))
+
+    assert outcome.value is not None
+    assert outcome.value.status is RunStatus.WAITING_APPROVAL
+
+
+class _EarlyFinalProvider:
+    name = "early-final"
+    journal_identity = "early-final/mini-native"
+
+    async def generate(self, request: ModelRequest) -> ModelResponse:
+        del request
+        return ModelResponse(
+            action=FinalAnswer(type="final", answer="too early"),
+            provider=self.name,
+            model="mini-native",
+            duration_ms=0,
+            attempt_count=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_mini_native_early_final_terminalizes_the_run(tmp_path: Any) -> None:
+    request, workspace = _request(tmp_path)
+    request = replace(request, provider=_EarlyFinalProvider())
+    components = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    run = _create_product_run(request, workspace)
+
+    failed = await components.runtime.execute(run.run_id)
+
+    assert failed.status is RunStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_response_checkpoint_rejects_a_side_effect_recovery_choice(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, workspace = _request(tmp_path)
+    components = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    run = _create_product_run(request, workspace)
+    original = AgentForgeMiniNativeHost.generate
+
+    async def interrupt_after_generate(
+        self: AgentForgeMiniNativeHost, *args: Any, **kwargs: Any
+    ) -> object:
+        await original(self, *args, **kwargs)
+        raise RuntimeError("interrupt after generate returns")
+
+    monkeypatch.setattr(AgentForgeMiniNativeHost, "generate", interrupt_after_generate)
+    with pytest.raises(RuntimeError, match="interrupt after generate returns"):
+        await components.runtime.execute(run.run_id)
+
+    monkeypatch.undo()
+    reopened = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    outcome = await reopened.runtime.resume(
+        ResumeRun(
+            command_id=uuid4(),
+            run_id=run.run_id,
+            recovery_choice=ResumeRecoveryChoice.MUTATION,
+        )
+    )
+
+    assert outcome.value is None
+    assert outcome.disposition == "REJECTED"
 
 
 @pytest.mark.asyncio

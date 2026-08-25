@@ -190,3 +190,30 @@ async def test_mini_native_approval_snapshot_restores_available_usage_on_restart
     resumed = await reopened.runtime.resume(run.run_id)
 
     assert resumed.status.value == "WAITING_APPROVAL"
+
+
+@pytest.mark.asyncio
+async def test_direct_provider_approval_keeps_last_usage_in_its_checkpoint(
+    tmp_path: Any,
+) -> None:
+    request, workspace = _request(tmp_path)
+    request = replace(request, provider=_UsageProvider(request.provider))
+    components = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    components.runtime._model_executor = None
+    components.runtime._model_workflow = None
+    run = _create_product_run(request, workspace)
+
+    waiting = await components.runtime.execute(run.run_id)
+
+    assert waiting.status.value == "WAITING_APPROVAL"
+    checkpoint = components.runtime._checkpoints.latest(run.run_id)
+    assert checkpoint is not None
+    snapshot = RuntimeSnapshotV5.model_validate(checkpoint.runtime_state)
+    assert snapshot.provider_usage_available
+    assert snapshot.model_usage == ModelUsage(
+        input_tokens=3,
+        output_tokens=2,
+        total_tokens=5,
+    )

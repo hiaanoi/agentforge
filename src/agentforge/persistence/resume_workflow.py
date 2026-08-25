@@ -140,6 +140,11 @@ class ResumeRunWorkflow:
                 and allow_running_response_checkpoint
                 and run.status == RunStatus.RUNNING.value
             )
+            if response_checkpoint_recovery and command.recovery_choice not in {
+                ResumeRecoveryChoice.AUTO,
+                ResumeRecoveryChoice.MODEL,
+            }:
+                response_checkpoint_recovery = False
             if approval is None and not response_checkpoint_recovery:
                 rejected = self._receipts.fail(
                     session, command.command_id, at=utc_now()

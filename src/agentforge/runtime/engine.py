@@ -484,6 +484,8 @@ class AgentRuntime:
                 )
         except MiniNativeApprovalPaused:
             return self._runs.get(run.run_id)
+        except ValueError as exc:
+            return self._fail(ownership, self._runs.get(run.run_id), str(exc))
         except (ModelOutputError, ModelProviderError, ModelRequestError) as exc:
             error_code = (
                 exc.code
@@ -751,7 +753,7 @@ class AgentRuntime:
             run_id=run_id,
             step_number=checkpoint.step_number,
         )
-        return snapshot.mini_native_pending_action is not None
+        return snapshot.resume_phase is ResumePhase.READY_FOR_MODEL
 
     async def _resume_owned(
         self,
@@ -772,7 +774,7 @@ class AgentRuntime:
                     run_id=run_id,
                     step_number=checkpoint.step_number,
                 )
-                if snapshot.mini_native_pending_action is not None:
+                if snapshot.resume_phase is ResumePhase.READY_FOR_MODEL:
                     return await self._run_mini_native(
                         ownership,
                         run,
@@ -1880,15 +1882,18 @@ class AgentRuntime:
             resume_phase=ResumePhase.AWAITING_APPROVAL,
             model_usage=(
                 last_model_usage
-                or ModelUsage(
-                    input_tokens=model_state.input_tokens,
-                    output_tokens=model_state.output_tokens,
-                    total_tokens=model_state.total_tokens,
-                    cached_input_tokens=model_state.cached_input_tokens,
-                    reasoning_tokens=model_state.reasoning_tokens,
+                if last_model_usage is not None
+                else (
+                    ModelUsage(
+                        input_tokens=model_state.input_tokens,
+                        output_tokens=model_state.output_tokens,
+                        total_tokens=model_state.total_tokens,
+                        cached_input_tokens=model_state.cached_input_tokens,
+                        reasoning_tokens=model_state.reasoning_tokens,
+                    )
+                    if model_state is not None
+                    else ModelUsage()
                 )
-                if model_state is not None
-                else ModelUsage()
             ),
             model_request_count=(model_state.model_request_count if model_state is not None else 0),
             loop_state=loop_state,
