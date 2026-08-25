@@ -1,0 +1,83 @@
+from __future__ import annotations
+
+import json
+import re
+from typing import Any, Protocol
+from uuid import UUID, uuid5
+
+from agentforge.models.base import ModelRequest
+from agentforge.models.domain import ModelResponse
+from agentforge.repair_engines.mini_native.contracts import (
+    CandidatePatchResult,
+    MiniNativeState,
+    RepairAction,
+    RepairActionKind,
+    RepairActionResult,
+)
+
+_ACTION_NAMESPACE = UUID("5a4c0d2e-a8a0-4cbb-9fb0-5cc7ec2ad6ed")
+_SECRET_KEY = re.compile(r"(?:api[_-]?key|token|secret|password|authorization|credential)", re.I)
+MAX_OUTPUT_CHARS = 20_000
+
+
+class MiniNativeHost(Protocol):
+    async def generate(self, request: ModelRequest) -> ModelResponse: ...
+
+    async def execute(self, action: RepairAction) -> RepairActionResult: ...
+
+    async def checkpoint(self, state: MiniNativeState) -> None: ...
+
+    async def publish(self, run_id: UUID) -> CandidatePatchResult: ...
+
+
+def classify_action(arguments: dict[str, Any]) -> RepairActionKind:
+    """Classify a mini-SWE action payload without executing it."""
+    raw = arguments.get("kind", arguments.get("action", arguments.get("type")))
+    if isinstance(raw, str):
+        try:
+            return RepairActionKind(raw.upper())
+        except ValueError:
+            pass
+    if any(key in arguments for key in ("content", "new_content", "patch", "edits")):
+        return RepairActionKind.WRITE
+    if any(key in arguments for key in ("command", "cmd", "test", "tests")):
+        return RepairActionKind.TEST
+    if any(key in arguments for key in ("answer", "final")):
+        return RepairActionKind.FINAL
+    return RepairActionKind.READ
+
+
+def action_argument_summary(arguments: dict[str, Any]) -> str:
+    """Serialize action metadata while redacting values likely to contain secrets."""
+    return json.dumps(_redact(arguments), sort_keys=True, separators=(",", ":"), default=str)
+
+
+def deterministic_action_id(kind: RepairActionKind, arguments: dict[str, Any]) -> UUID:
+    payload = f"{kind.value}:{action_argument_summary(arguments)}"
+    return uuid5(_ACTION_NAMESPACE, payload)
+
+
+def bound_output(value: str, *, limit: int = MAX_OUTPUT_CHARS) -> tuple[str, bool]:
+    if len(value) <= limit:
+        return value, False
+    return value[:limit], True
+
+
+def _redact(value: Any, key: str | None = None) -> Any:
+    if key is not None and _SECRET_KEY.search(key):
+        return "<redacted>"
+    if isinstance(value, dict):
+        return {str(k): _redact(v, str(k)) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact(item) for item in value]
+    return value
+
+
+__all__ = [
+    "MAX_OUTPUT_CHARS",
+    "MiniNativeHost",
+    "action_argument_summary",
+    "bound_output",
+    "classify_action",
+    "deterministic_action_id",
+]
