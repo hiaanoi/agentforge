@@ -9,3 +9,6 @@ include mini-SWE-agent's benchmark runner, Docker environment, UI, or dataset
 code.
 
 Source: https://github.com/SWE-agent/mini-swe-agent
+
+The mini-native integration's pinned upstream source notice is maintained in
+[`src/agentforge/repair_engines/mini_native/NOTICE.md`](src/agentforge/repair_engines/mini_native/NOTICE.md).
