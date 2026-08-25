@@ -40,6 +40,7 @@ def classify_action(
 ) -> RepairActionKind:
     """Classify a mini-SWE action payload without executing it."""
     registered_kind = {
+        "bash": RepairActionKind.BASH,
         "read_file": RepairActionKind.READ,
         "edit_file": RepairActionKind.WRITE,
         "write_file": RepairActionKind.WRITE,

@@ -35,6 +35,7 @@ def test_action_classification(arguments: dict[str, object], expected: RepairAct
 @pytest.mark.parametrize(
     ("tool_name", "arguments", "expected"),
     [
+        ("bash", {"command": "ls"}, RepairActionKind.BASH),
         ("read_file", {"path": "src/app.py"}, RepairActionKind.READ),
         (
             "edit_file",

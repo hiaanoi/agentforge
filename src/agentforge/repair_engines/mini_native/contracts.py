@@ -15,6 +15,7 @@ from agentforge.models.domain import ModelResponse
 
 
 class RepairActionKind(StrEnum):
+    BASH = "BASH"
     READ = "READ"
     WRITE = "WRITE"
     TEST = "TEST"
@@ -207,6 +208,7 @@ def _classify_action(
     arguments: dict[str, Any], *, tool_name: str | None = None
 ) -> RepairActionKind:
     registered_kind = {
+        "bash": RepairActionKind.BASH,
         "read_file": RepairActionKind.READ,
         "edit_file": RepairActionKind.WRITE,
         "write_file": RepairActionKind.WRITE,

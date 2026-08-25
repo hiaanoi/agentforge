@@ -8,7 +8,7 @@ from pydantic import JsonValue
 
 from agentforge.domain.enums import ToolRisk
 from agentforge.domain.models import ToolSpec
-from agentforge.models.base import ModelRequest
+from agentforge.models.base import ModelRequest, ToolCall
 from agentforge.models.domain import ModelResponse
 from agentforge.repair_engines.mini_native.contracts import (
     CandidatePatchResult,
@@ -19,63 +19,26 @@ from agentforge.repair_engines.mini_native.contracts import (
     action_history_item,
     to_repair_action,
 )
-from agentforge.repair_engines.mini_native.host import (
-    MiniNativeHost,
+from agentforge.repair_engines.mini_native.host import MiniNativeHost
+from agentforge.repair_engines.mini_native.vendor.bash_protocol import (
+    BASH_INSTANCE_TEMPLATE,
+    BASH_SYSTEM_TEMPLATE,
+    bash_tool_schema,
+    format_observation,
+    parse_submit_output,
 )
 from agentforge.repair_engines.mini_native.vendor.loop import VendorRepairLoop
-from agentforge.tools.mutation.edit_file import EditFileArguments
-from agentforge.tools.repository.list_files import ListFilesArguments
-from agentforge.tools.repository.read_file import ReadFileArguments
-from agentforge.tools.repository.search_text import SearchTextArguments
-from agentforge.tools.testing.run_tests import RunTestsArguments
 
-_SYSTEM_PROMPT = """You are a helpful assistant that can interact with a computer to repair code.
 
-Recommended workflow:
-1. Use list_files and search_text to locate the relevant implementation and tests.
-2. Read only the relevant file sections.
-3. Edit the source with an exact old_text/new_text replacement.
-4. Run the focused test profile and use its output to iterate.
-5. After a passing test, submit the verified repair.
-
-Do not repeatedly read the same slices without changing the plan. Keep edits small and exact."""
-_TOOLS = [
-    ToolSpec(
-        name="list_files",
-        description="List non-sensitive files within the candidate workspace",
-        input_schema=ListFilesArguments.model_json_schema(),
-        risk_level=ToolRisk.READ,
-        requires_approval=False,
-    ),
-    ToolSpec(
-        name="read_file",
-        description="Read a file from the candidate workspace",
-        input_schema=ReadFileArguments.model_json_schema(),
-        risk_level=ToolRisk.READ,
-        requires_approval=False,
-    ),
-    ToolSpec(
-        name="search_text",
-        description="Search text within the candidate workspace",
-        input_schema=SearchTextArguments.model_json_schema(),
-        risk_level=ToolRisk.READ,
-        requires_approval=False,
-    ),
-    ToolSpec(
-        name="edit_file",
-        description="Edit a file in the candidate workspace",
-        input_schema=EditFileArguments.model_json_schema(),
-        risk_level=ToolRisk.WRITE,
-        requires_approval=True,
-    ),
-    ToolSpec(
-        name="run_tests",
-        description="Run focused tests in the candidate workspace",
-        input_schema=RunTestsArguments.model_json_schema(),
+def _bash_tool_spec() -> ToolSpec:
+    schema = bash_tool_schema()
+    return ToolSpec(
+        name=cast(str, schema["name"]),
+        description=cast(str, schema["description"]),
+        input_schema=cast(dict[str, JsonValue], schema["parameters"]),
         risk_level=ToolRisk.DANGEROUS,
-        requires_approval=True,
-    ),
-]
+        requires_approval=False,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +51,7 @@ class MiniNativeResult:
 
 
 class MiniNativeRepairEngine:
-    """Adapt the pinned mini-SWE-agent loop to AgentForge's host protocol."""
+    """Adapt mini-SWE-agent's one-command-at-a-time bash loop to the host protocol."""
 
     def __init__(self, host: MiniNativeHost) -> None:
         self._host = host
@@ -105,60 +68,33 @@ class MiniNativeRepairEngine:
     ) -> MiniNativeResult:
         history = list(history or [])
         candidate: CandidatePatchResult | None = None
-        last_path = _last_path(history)
 
         def build_request(step: int, compacted_history: list[JsonValue]) -> ModelRequest:
             return ModelRequest(
                 run_id=run_id,
-                task=task,
+                task=BASH_INSTANCE_TEMPLATE.replace("{{task}}", task),
                 step_number=step,
-                instructions=_SYSTEM_PROMPT,
+                instructions=BASH_SYSTEM_TEMPLATE,
                 preserve_tool_call_text=True,
                 history=compacted_history,
-                tools=_TOOLS,
+                tools=[_bash_tool_spec()],
             )
 
         async def execute(response: ModelResponse, step: int) -> bool:
-            nonlocal candidate, last_path, last_test_passed
-            action = to_repair_action(
-                response.action,
+            nonlocal candidate
+            action = _to_bash_action(
+                response,
                 run_id=run_id,
                 step=step,
                 working_directory=working_directory,
-                parent_model_call_id=response.model_call_id,
             )
-            if action.kind is RepairActionKind.READ:
-                path = action.arguments.get("path")
-                if isinstance(path, str) and path:
-                    last_path = path
-            elif action.kind is RepairActionKind.WRITE and "path" not in action.arguments:
-                if last_path is not None:
-                    action = action.model_copy(
-                        update={"arguments": {**action.arguments, "path": last_path}}
-                    )
             history.append(action_history_item(action))
-            if action.kind is RepairActionKind.FINAL and not last_test_passed:
-                history.append(
-                    _result_history_item(
-                        action,
-                        RepairActionResult(
-                            returncode=1,
-                            stdout="A passing test is required before submission",
-                            duration_ms=0,
-                        ),
-                    )
-                )
-                return False
             result = await self._host.execute(action)
-            history.append(_result_history_item(action, result))
-            if action.kind is RepairActionKind.TEST:
-                last_test_passed = result.returncode == 0
-            elif action.kind is RepairActionKind.WRITE:
-                last_test_passed = False
-            if action.kind is RepairActionKind.FINAL and result.returncode in {None, 0}:
-                candidate = await self._host.publish(run_id)
-                return candidate.published
-            return False
+            history.append(_observation_history_item(action, result))
+            if parse_submit_output(result.stdout) is None:
+                return False
+            candidate = await self._host.publish(run_id)
+            return True
 
         async def checkpoint(step: int, compacted_history: list[JsonValue]) -> None:
             await self._host.checkpoint(
@@ -192,38 +128,16 @@ class MiniNativeRepairEngine:
         last_test_passed: bool,
         saved_result: RepairActionResult | None = None,
     ) -> MiniNativeResult:
-        """Finish a response checkpoint without requesting the model again."""
-        candidate: CandidatePatchResult | None = None
-        if action.kind is RepairActionKind.FINAL and not last_test_passed:
-            result = RepairActionResult(
-                returncode=1,
-                stdout="A passing test is required before submission",
-                duration_ms=0,
-            )
-            history.append(_result_history_item(action, result))
-            await self._host.checkpoint(
-                MiniNativeState(
-                    run_id=action.run_id,
-                    step_number=1,
-                    history=tuple(history),
-                    last_test_passed=False,
-                )
-            )
-            return MiniNativeResult(
-                submitted=False,
-                candidate=None,
-                history=history,
-                model_calls=0,
-                last_test_passed=False,
-            )
+        """Finish an already-dispatched bash command without another model request."""
+        if action.kind is not RepairActionKind.BASH:
+            raise ValueError("Only pending bash actions can resume the mini-native loop")
         result = saved_result or await self._host.execute(action)
-        history.append(_result_history_item(action, result))
-        if action.kind is RepairActionKind.TEST:
-            last_test_passed = result.returncode == 0
-        elif action.kind is RepairActionKind.WRITE:
-            last_test_passed = False
-        if action.kind is RepairActionKind.FINAL and result.returncode in {None, 0}:
-            candidate = await self._host.publish(action.run_id)
+        history.append(_observation_history_item(action, result))
+        candidate = (
+            await self._host.publish(action.run_id)
+            if parse_submit_output(result.stdout) is not None
+            else None
+        )
         await self._host.checkpoint(
             MiniNativeState(
                 run_id=action.run_id,
@@ -233,7 +147,7 @@ class MiniNativeRepairEngine:
             )
         )
         return MiniNativeResult(
-            submitted=bool(candidate and candidate.published),
+            submitted=candidate is not None,
             candidate=candidate,
             history=history,
             model_calls=0,
@@ -241,36 +155,41 @@ class MiniNativeRepairEngine:
         )
 
 
-def _result_history_item(action: RepairAction, result: RepairActionResult) -> JsonValue:
+def _to_bash_action(
+    response: ModelResponse,
+    *,
+    run_id: UUID,
+    step: int,
+    working_directory: str,
+) -> RepairAction:
+    if not isinstance(response.action, ToolCall) or response.action.tool != "bash":
+        raise ValueError("Mini-native models must return a bash tool call")
+    command = response.action.arguments.get("command")
+    if not isinstance(command, str) or not command.strip():
+        raise ValueError("Mini-native bash tool calls require a non-empty command")
+    return to_repair_action(
+        response.action,
+        run_id=run_id,
+        step=step,
+        working_directory=working_directory,
+        parent_model_call_id=response.model_call_id,
+    )
+
+
+def _observation_history_item(action: RepairAction, result: RepairActionResult) -> JsonValue:
+    output = result.stdout + result.stderr
     return cast(
         JsonValue,
         {
             "kind": "TOOL_RESULT",
-            "payload": result.model_dump(mode="json"),
+            "payload": {
+                "output": format_observation(
+                    {"returncode": result.returncode, "output": output}
+                )
+            },
             "call_id": str(action.action_id),
         },
     )
-
-
-def _last_path(history: list[JsonValue]) -> str | None:
-    for item in reversed(history):
-        if not isinstance(item, dict):
-            continue
-        if item.get("kind") == "TOOL_CALL":
-            payload = item.get("payload")
-            if isinstance(payload, dict):
-                arguments = payload.get("arguments")
-                if isinstance(arguments, dict):
-                    path = arguments.get("path")
-                    if isinstance(path, str):
-                        return path
-        if item.get("type") == "tool_call":
-            arguments = item.get("arguments")
-            if isinstance(arguments, dict):
-                path = arguments.get("path")
-                if isinstance(path, str):
-                    return path
-    return None
 
 
 __all__ = ["MiniNativeRepairEngine", "MiniNativeResult"]
