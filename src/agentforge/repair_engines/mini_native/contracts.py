@@ -189,17 +189,25 @@ def to_repair_action(
     )
 
 
-def action_history_item(action: RepairAction) -> JsonValue:
+def action_history_item(
+    action: RepairAction,
+    *,
+    call_id: str | None = None,
+    reason: str | None = None,
+) -> JsonValue:
+    payload: dict[str, Any] = {
+        "tool_name": action.tool_name,
+        "kind": action.kind.value,
+        "arguments": _redact(action.arguments),
+    }
+    if reason is not None:
+        payload["reason"] = reason
     return cast(
         JsonValue,
         {
             "kind": "TOOL_CALL",
-            "payload": {
-                "tool_name": action.tool_name,
-                "kind": action.kind.value,
-                "arguments": _redact(action.arguments),
-            },
-            "call_id": str(action.action_id),
+            "payload": payload,
+            "call_id": call_id if call_id is not None else str(action.action_id),
         },
     )
 

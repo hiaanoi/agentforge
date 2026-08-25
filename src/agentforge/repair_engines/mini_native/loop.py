@@ -82,15 +82,15 @@ class MiniNativeRepairEngine:
 
         async def execute(response: ModelResponse, step: int) -> bool:
             nonlocal candidate
-            action = _to_bash_action(
+            action, call_id, reason = _to_bash_action(
                 response,
                 run_id=run_id,
                 step=step,
                 working_directory=working_directory,
             )
-            history.append(action_history_item(action))
+            history.append(action_history_item(action, call_id=call_id, reason=reason))
             result = await self._host.execute(action)
-            history.append(_observation_history_item(action, result))
+            history.append(_observation_history_item(action, result, call_id=call_id))
             if parse_submit_output(_combined_output(result)) is None:
                 return False
             candidate = await self._host.publish(run_id)
@@ -161,22 +161,31 @@ def _to_bash_action(
     run_id: UUID,
     step: int,
     working_directory: str,
-) -> RepairAction:
+) -> tuple[RepairAction, str | None, str | None]:
     if not isinstance(response.action, ToolCall) or response.action.tool != "bash":
         raise ValueError("Mini-native models must return a bash tool call")
     command = response.action.arguments.get("command")
     if not isinstance(command, str) or not command.strip():
         raise ValueError("Mini-native bash tool calls require a non-empty command")
-    return to_repair_action(
-        response.action,
-        run_id=run_id,
-        step=step,
-        working_directory=working_directory,
-        parent_model_call_id=response.model_call_id,
+    return (
+        to_repair_action(
+            response.action,
+            run_id=run_id,
+            step=step,
+            working_directory=working_directory,
+            parent_model_call_id=response.model_call_id,
+        ),
+        response.action.call_id,
+        response.action.reason,
     )
 
 
-def _observation_history_item(action: RepairAction, result: RepairActionResult) -> JsonValue:
+def _observation_history_item(
+    action: RepairAction,
+    result: RepairActionResult,
+    *,
+    call_id: str | None = None,
+) -> JsonValue:
     return cast(
         JsonValue,
         {
@@ -186,7 +195,7 @@ def _observation_history_item(action: RepairAction, result: RepairActionResult) 
                     {"returncode": result.returncode, "output": _combined_output(result)}
                 )
             },
-            "call_id": str(action.action_id),
+            "call_id": call_id if call_id is not None else str(action.action_id),
         },
     )
 

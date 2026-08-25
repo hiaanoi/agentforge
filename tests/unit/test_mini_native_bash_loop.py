@@ -22,12 +22,20 @@ from agentforge.repair_engines.mini_native.vendor.bash_protocol import (
 
 
 class _FakeBashHost:
-    def __init__(self, *, submit_marker_in_stderr: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        submit_marker_in_stderr: bool = False,
+        provider_call_id: str | None = None,
+        reason: str | None = None,
+    ) -> None:
         self.requests: list[ModelRequest] = []
         self.actions: list[RepairAction] = []
         self.checkpoints: list[MiniNativeState] = []
         self.publish_calls: list[UUID] = []
         self._submit_marker_in_stderr = submit_marker_in_stderr
+        self._provider_call_id = provider_call_id
+        self._reason = reason
         self._commands = iter(
             (
                 "ls",
@@ -42,8 +50,10 @@ class _FakeBashHost:
         return ModelResponse(
             action=ToolCall(
                 type="tool_call",
+                call_id=self._provider_call_id,
                 tool="bash",
                 arguments={"command": next(self._commands)},
+                reason=self._reason,
             ),
             provider="fake",
             model="fake-model",
@@ -128,6 +138,32 @@ async def test_mini_native_loop_runs_frozen_bash_protocol_and_publishes_submissi
     assert result.submitted
     assert result.candidate is not None and result.candidate.published
     assert host.publish_calls == [run_id]
+
+
+@pytest.mark.asyncio
+async def test_mini_native_loop_preserves_provider_call_id_and_reason_in_history() -> None:
+    from agentforge.repair_engines.mini_native.loop import MiniNativeRepairEngine
+
+    host = _FakeBashHost(
+        provider_call_id="provider-bash-call-42",
+        reason="I will inspect the repository first.",
+    )
+    host._commands = iter(("ls", "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"))
+
+    await MiniNativeRepairEngine(host).run(
+        run_id=UUID("00000000-0000-0000-0000-000000000132"),
+        task="Repair widget behavior",
+        max_steps=2,
+        working_directory=".",
+    )
+
+    call, result = host.requests[1].history
+    assert call["call_id"] == "provider-bash-call-42"
+    assert call["call_id"] != str(host.actions[0].action_id)
+    assert call["payload"]["reason"] == "I will inspect the repository first."
+    assert result["call_id"] == "provider-bash-call-42"
+    deepseek_call = DeepSeekModelProvider._map_history_item(call)
+    assert deepseek_call["content"] == "I will inspect the repository first."
 
 
 @pytest.mark.asyncio
