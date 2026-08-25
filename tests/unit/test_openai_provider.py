@@ -31,6 +31,30 @@ class FakeClient:
         self.responses = FakeResponses(response)
 
 
+def test_history_mapper_accepts_generic_runtime_tool_items() -> None:
+    call = OpenAIModelProvider._map_history_item(
+        {
+            "type": "tool_call",
+            "call_id": "call_generic",
+            "payload": {"tool_name": "read_file", "arguments": {"path": "README.md"}},
+        }
+    )
+    result = OpenAIModelProvider._map_history_item(
+        {
+            "tool_result": {"output": "hello"},
+            "call_id": "call_generic",
+        }
+    )
+    assert call == {
+        "type": "function_call",
+        "call_id": "call_generic",
+        "name": "read_file",
+        "arguments": '{"path":"README.md"}',
+    }
+    assert result["type"] == "function_call_output"
+    assert result["call_id"] == "call_generic"
+
+
 def request() -> ModelRequest:
     return ModelRequest(
         task="inspect repository",

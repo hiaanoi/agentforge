@@ -134,6 +134,26 @@ def response(
     )
 
 
+def test_history_mapper_accepts_generic_runtime_tool_items() -> None:
+    call = DeepSeekModelProvider._map_history_item(
+        {
+            "type": "tool_call",
+            "call_id": "call_generic",
+            "payload": {"tool_name": "read_file", "arguments": {"path": "README.md"}},
+        }
+    )
+    result = DeepSeekModelProvider._map_history_item(
+        {"tool_result": {"output": "hello"}, "call_id": "call_generic"}
+    )
+    assert call["tool_calls"][0]["function"]["name"] == "read_file"
+    assert call["tool_calls"][0]["function"]["arguments"] == '{"path":"README.md"}'
+    assert result == {
+        "role": "tool",
+        "tool_call_id": "call_generic",
+        "content": '{"output":"hello"}',
+    }
+
+
 @pytest.mark.asyncio
 async def test_provider_maps_messages_tools_usage_and_fixed_options() -> None:
     usage = SimpleNamespace(

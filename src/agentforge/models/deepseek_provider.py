@@ -380,6 +380,14 @@ class DeepSeekModelProvider:
         kind = item.get("kind")
         payload = item.get("payload")
         call_id = item.get("call_id")
+        if item.get("type") == "tool_call":
+            kind = "TOOL_CALL"
+            payload = item.get("payload")
+        elif "tool_result" in item:
+            kind = "TOOL_RESULT"
+            payload = item["tool_result"]
+        if kind == "TOOL_CALL" and isinstance(payload, dict):
+            payload = {**payload, "tool": payload.get("tool", payload.get("tool_name"))}
         if (
             kind == "TOOL_CALL"
             and isinstance(payload, dict)
