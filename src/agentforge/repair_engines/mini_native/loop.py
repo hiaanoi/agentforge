@@ -103,7 +103,17 @@ class MiniNativeRepairEngine:
             )
             history.append(action_history_item(action))
             if action.kind is RepairActionKind.FINAL and not last_test_passed:
-                raise ValueError("A passing test is required before submission")
+                history.append(
+                    _result_history_item(
+                        action,
+                        RepairActionResult(
+                            returncode=1,
+                            stdout="A passing test is required before submission",
+                            duration_ms=0,
+                        ),
+                    )
+                )
+                return False
             result = await self._host.execute(action)
             history.append(_result_history_item(action, result))
             if action.kind is RepairActionKind.TEST:
@@ -150,7 +160,27 @@ class MiniNativeRepairEngine:
         """Finish a response checkpoint without requesting the model again."""
         candidate: CandidatePatchResult | None = None
         if action.kind is RepairActionKind.FINAL and not last_test_passed:
-            raise ValueError("A passing test is required before submission")
+            result = RepairActionResult(
+                returncode=1,
+                stdout="A passing test is required before submission",
+                duration_ms=0,
+            )
+            history.append(_result_history_item(action, result))
+            await self._host.checkpoint(
+                MiniNativeState(
+                    run_id=action.run_id,
+                    step_number=1,
+                    history=tuple(history),
+                    last_test_passed=False,
+                )
+            )
+            return MiniNativeResult(
+                submitted=False,
+                candidate=None,
+                history=history,
+                model_calls=0,
+                last_test_passed=False,
+            )
         result = saved_result or await self._host.execute(action)
         history.append(_result_history_item(action, result))
         if action.kind is RepairActionKind.TEST:

@@ -137,7 +137,7 @@ async def test_mini_native_loop_retries_after_a_failed_test_before_submission() 
 
 
 @pytest.mark.asyncio
-async def test_mini_native_loop_requires_a_new_passing_test_after_a_write() -> None:
+async def test_mini_native_loop_requests_a_test_after_an_early_submission() -> None:
     from agentforge.repair_engines.mini_native.loop import MiniNativeRepairEngine
 
     host = _FakeHost(fail_first_test=False)
@@ -158,17 +158,26 @@ async def test_mini_native_loop_requires_a_new_passing_test_after_a_write() -> N
             },
         ),
         FinalAnswer(type="final", answer="submit stale verification"),
+        ToolCall(
+            type="tool_call",
+            tool="run_tests",
+            arguments={"profile_id": "unit"},
+        ),
+        FinalAnswer(type="final", answer="submit after retest"),
     ]
 
-    with pytest.raises(ValueError, match="passing test"):
-        await MiniNativeRepairEngine(host).run(
-            run_id=UUID("00000000-0000-0000-0000-000000000124"),
-            task="Repair widget behavior",
-            max_steps=3,
-            working_directory=".",
-        )
+    result = await MiniNativeRepairEngine(host).run(
+        run_id=UUID("00000000-0000-0000-0000-000000000124"),
+        task="Repair widget behavior",
+        max_steps=5,
+        working_directory=".",
+    )
 
-    assert not host.publish_calls
+    assert result.submitted
+    assert host.publish_calls
+    assert "A passing test is required before submission" in json.dumps(
+        host.requests[3].history
+    )
 
 
 @pytest.mark.asyncio
@@ -178,15 +187,15 @@ async def test_mini_native_loop_does_not_trust_history_as_a_test_verdict() -> No
     host = _FakeHost(fail_first_test=False)
     host._responses = [FinalAnswer(type="final", answer="submit from untrusted history")]
 
-    with pytest.raises(ValueError, match="passing test"):
-        await MiniNativeRepairEngine(host).run(
-            run_id=UUID("00000000-0000-0000-0000-000000000126"),
-            task="Repair widget behavior",
-            max_steps=1,
-            working_directory=".",
-            history=[{"tool_result": {"output": {"exit_code": 0}}}],
-        )
+    result = await MiniNativeRepairEngine(host).run(
+        run_id=UUID("00000000-0000-0000-0000-000000000126"),
+        task="Repair widget behavior",
+        max_steps=1,
+        working_directory=".",
+        history=[{"tool_result": {"output": {"exit_code": 0}}}],
+    )
 
+    assert not result.submitted
     assert not host.publish_calls
 
 
