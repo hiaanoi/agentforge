@@ -1,3 +1,4 @@
+# ruff: noqa: E501 - frozen upstream prompt text is intentionally preserved.
 """Frozen mini-SWE-agent bash protocol (commit 25941c89cfbc91eb40b3f8756348c91d9977d57e)."""
 
 import json
@@ -146,6 +147,6 @@ def format_observation(output: dict[str, Any]) -> str:
 def parse_submit_output(output: str) -> str | None:
     """Return text after the submit marker only when it is the first output line."""
     lines = output.splitlines()
-    if not lines or lines[0].strip() != SUBMIT_MARKER:
+    if not lines or lines[0] != SUBMIT_MARKER:
         return None
     return "\n".join(lines[1:])
