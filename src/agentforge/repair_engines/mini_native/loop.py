@@ -105,6 +105,7 @@ class MiniNativeRepairEngine:
     ) -> MiniNativeResult:
         history = list(history or [])
         candidate: CandidatePatchResult | None = None
+        last_path = _last_path(history)
 
         def build_request(step: int, compacted_history: list[JsonValue]) -> ModelRequest:
             return ModelRequest(
@@ -118,7 +119,7 @@ class MiniNativeRepairEngine:
             )
 
         async def execute(response: ModelResponse, step: int) -> bool:
-            nonlocal candidate, last_test_passed
+            nonlocal candidate, last_path, last_test_passed
             action = to_repair_action(
                 response.action,
                 run_id=run_id,
@@ -126,6 +127,15 @@ class MiniNativeRepairEngine:
                 working_directory=working_directory,
                 parent_model_call_id=response.model_call_id,
             )
+            if action.kind is RepairActionKind.READ:
+                path = action.arguments.get("path")
+                if isinstance(path, str) and path:
+                    last_path = path
+            elif action.kind is RepairActionKind.WRITE and "path" not in action.arguments:
+                if last_path is not None:
+                    action = action.model_copy(
+                        update={"arguments": {**action.arguments, "path": last_path}}
+                    )
             history.append(action_history_item(action))
             if action.kind is RepairActionKind.FINAL and not last_test_passed:
                 history.append(
@@ -240,6 +250,27 @@ def _result_history_item(action: RepairAction, result: RepairActionResult) -> Js
             "call_id": str(action.action_id),
         },
     )
+
+
+def _last_path(history: list[JsonValue]) -> str | None:
+    for item in reversed(history):
+        if not isinstance(item, dict):
+            continue
+        if item.get("kind") == "TOOL_CALL":
+            payload = item.get("payload")
+            if isinstance(payload, dict):
+                arguments = payload.get("arguments")
+                if isinstance(arguments, dict):
+                    path = arguments.get("path")
+                    if isinstance(path, str):
+                        return path
+        if item.get("type") == "tool_call":
+            arguments = item.get("arguments")
+            if isinstance(arguments, dict):
+                path = arguments.get("path")
+                if isinstance(path, str):
+                    return path
+    return None
 
 
 __all__ = ["MiniNativeRepairEngine", "MiniNativeResult"]

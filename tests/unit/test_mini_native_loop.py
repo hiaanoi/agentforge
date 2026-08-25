@@ -201,6 +201,38 @@ async def test_mini_native_loop_does_not_trust_history_as_a_test_verdict() -> No
     assert not host.publish_calls
 
 
+@pytest.mark.asyncio
+async def test_mini_native_loop_reuses_last_read_path_for_incomplete_edit_call() -> None:
+    from agentforge.repair_engines.mini_native.loop import MiniNativeRepairEngine
+
+    host = _FakeHost(fail_first_test=False)
+    host._responses = [
+        ToolCall(
+            type="tool_call",
+            tool="read_file",
+            arguments={"path": "src/widget.py"},
+        ),
+        ToolCall(
+            type="tool_call",
+            tool="edit_file",
+            arguments={
+                "old_text": "before",
+                "new_text": "after",
+                "expected_sha256": "a" * 64,
+            },
+        ),
+    ]
+
+    await MiniNativeRepairEngine(host).run(
+        run_id=UUID("00000000-0000-0000-0000-000000000127"),
+        task="Repair widget behavior",
+        max_steps=2,
+        working_directory=".",
+    )
+
+    assert host.actions[1].arguments["path"] == "src/widget.py"
+
+
 def test_vendor_context_redacts_and_bounds_tool_call_payloads() -> None:
     oversized_content = "x" * (MAX_OBSERVATION_CHARS * 2)
     compacted = compact_history(
