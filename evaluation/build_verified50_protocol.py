@@ -85,6 +85,19 @@ def build_mini_native_canary(parent_path: Path, output_path: Path) -> None:
     canary["protocol_name"] = "verified50-openai-gpt54mini-mini-native-canary"
     canary["parent_protocol_sha256"] = _digest(parent)
     canary["tasks"] = tasks[:10]
+    canary["agentforge_budget"] = {
+        **canary["agentforge_budget"],
+        "repair_profile": "SWE_BENCH_PASS1",
+        "logical_model_calls": 50,
+        "run_steps": 80,
+        "wall_time_seconds": 1800,
+        "provider_max_model_requests": 52,
+    }
+    canary["mini_budget"] = {
+        **canary["mini_budget"],
+        "step_limit": 50,
+        "wall_time_seconds": 1800,
+    }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         json.dumps(canary, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
