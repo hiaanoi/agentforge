@@ -9,7 +9,7 @@ from agentforge.domain.models import PendingToolCall, RuntimeSnapshot
 from agentforge.domain.repair import RepairCompletionStatus
 from agentforge.domain.test_execution import PendingTestExecution, TestResult
 from agentforge.models.domain import ModelUsage
-from agentforge.repair_engines.mini_native.contracts import RepairAction
+from agentforge.repair_engines.mini_native.contracts import RepairAction, RepairActionResult
 
 
 class SnapshotVersionError(ValueError):
@@ -111,7 +111,34 @@ class RuntimeSnapshotV4(BaseModel):
     last_test_result: TestResult | None = None
     test_execution_state: ProcessExecutionStatus | None = None
     repair: RepairSnapshotState | None = None
+
+
+class RuntimeSnapshotV5(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[5] = 5
+    run_id: UUID
+    step_number: int = Field(ge=0)
+    history: list[JsonValue] = Field(default_factory=list)
+    context_items: list[ContextItem] = Field(default_factory=list)
+    pending_tool_call: PendingToolCall | None = None
+    pending_approval_id: UUID | None = None
+    tool_call_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    resume_phase: ResumePhase
+    model_usage: ModelUsage = Field(default_factory=ModelUsage)
+    model_request_count: int = Field(default=0, ge=0)
+    loop_state: LoopState = Field(default_factory=LoopState)
+    context_state: ResumeContextState = Field(default_factory=ResumeContextState)
+    last_provider_metadata: dict[str, JsonValue] = Field(default_factory=dict)
+    last_model_error: str | None = None
+    context_policy_version: str = "1"
+    system_prompt_version: str = "1"
+    pending_test_execution: PendingTestExecution | None = None
+    last_test_result: TestResult | None = None
+    test_execution_state: ProcessExecutionStatus | None = None
+    repair: RepairSnapshotState | None = None
     mini_native_pending_action: RepairAction | None = None
+    mini_native_pending_action_result: RepairActionResult | None = None
     mini_native_last_test_passed: bool = False
     provider_usage_available: bool = False
 
@@ -121,7 +148,7 @@ def load_runtime_snapshot(
     *,
     run_id: UUID,
     step_number: int,
-) -> RuntimeSnapshotV4:
+) -> RuntimeSnapshotV5:
     raw_version = state.get("schema_version")
     if raw_version is None:
         history = state.get("history", [])
@@ -173,7 +200,12 @@ def load_runtime_snapshot(
         snapshot_v4 = RuntimeSnapshotV4.model_validate(state)
         if snapshot_v4.run_id != run_id or snapshot_v4.step_number != step_number:
             raise SnapshotVersionError("Snapshot identity does not match checkpoint")
-        return snapshot_v4
+        return _upgrade_v4(snapshot_v4)
+    if raw_version == 5:
+        snapshot_v5 = RuntimeSnapshotV5.model_validate(state)
+        if snapshot_v5.run_id != run_id or snapshot_v5.step_number != step_number:
+            raise SnapshotVersionError("Snapshot identity does not match checkpoint")
+        return snapshot_v5
     raise SnapshotVersionError(f"Unsupported RuntimeSnapshot version {raw_version!r}")
 
 
@@ -198,8 +230,8 @@ def _upgrade_v2(snapshot: RuntimeSnapshotV2) -> RuntimeSnapshotV3:
     )
 
 
-def _upgrade_v3(snapshot: RuntimeSnapshotV3) -> RuntimeSnapshotV4:
-    return RuntimeSnapshotV4(
+def _upgrade_v3(snapshot: RuntimeSnapshotV3) -> RuntimeSnapshotV5:
+    return RuntimeSnapshotV5(
         run_id=snapshot.run_id,
         step_number=snapshot.step_number,
         history=list(snapshot.history),
@@ -219,4 +251,29 @@ def _upgrade_v3(snapshot: RuntimeSnapshotV3) -> RuntimeSnapshotV4:
         pending_test_execution=snapshot.pending_test_execution,
         last_test_result=snapshot.last_test_result,
         test_execution_state=snapshot.test_execution_state,
+    )
+
+
+def _upgrade_v4(snapshot: RuntimeSnapshotV4) -> RuntimeSnapshotV5:
+    return RuntimeSnapshotV5(
+        run_id=snapshot.run_id,
+        step_number=snapshot.step_number,
+        history=list(snapshot.history),
+        context_items=list(snapshot.context_items),
+        pending_tool_call=snapshot.pending_tool_call,
+        pending_approval_id=snapshot.pending_approval_id,
+        tool_call_digest=snapshot.tool_call_digest,
+        resume_phase=snapshot.resume_phase,
+        model_usage=snapshot.model_usage,
+        model_request_count=snapshot.model_request_count,
+        loop_state=snapshot.loop_state,
+        context_state=snapshot.context_state,
+        last_provider_metadata=dict(snapshot.last_provider_metadata),
+        last_model_error=snapshot.last_model_error,
+        context_policy_version=snapshot.context_policy_version,
+        system_prompt_version=snapshot.system_prompt_version,
+        pending_test_execution=snapshot.pending_test_execution,
+        last_test_result=snapshot.last_test_result,
+        test_execution_state=snapshot.test_execution_state,
+        repair=snapshot.repair,
     )

@@ -103,7 +103,11 @@ from agentforge.repair_engines.mini_native.agentforge_host import (
     AgentForgeMiniNativeHost,
     MiniNativeApprovalPaused,
 )
-from agentforge.repair_engines.mini_native.contracts import RepairAction, sanitize_history
+from agentforge.repair_engines.mini_native.contracts import (
+    RepairAction,
+    RepairActionResult,
+    sanitize_history,
+)
 from agentforge.repair_engines.mini_native.loop import MiniNativeRepairEngine
 from agentforge.repair_engines.models import RepairEngineKind
 from agentforge.runtime.candidate_patch import CandidatePatchPublisher, CandidatePatchStore
@@ -113,7 +117,7 @@ from agentforge.runtime.mutations import (
     MutationOutcomeIndeterminateError,
 )
 from agentforge.runtime.repair import CompletionContext, RepairCoordinator
-from agentforge.runtime.snapshots import RuntimeSnapshotV4, load_runtime_snapshot
+from agentforge.runtime.snapshots import RuntimeSnapshotV5, load_runtime_snapshot
 from agentforge.runtime.test_execution import (
     TestExecutionCancelledError,
     TestExecutionCoordinator,
@@ -398,6 +402,10 @@ class AgentRuntime:
         history: list[JsonValue] | None = None,
         last_test_passed: bool = False,
         pending_action: RepairAction | None = None,
+        provider_usage_available: bool = False,
+        last_provider_metadata: dict[str, JsonValue] | None = None,
+        last_model_usage: ModelUsage | None = None,
+        pending_action_result: RepairActionResult | None = None,
     ) -> Run:
         if (
             self._workspace is None
@@ -407,7 +415,12 @@ class AgentRuntime:
             raise RuntimeError("Mini native runtime is missing candidate workspace components")
 
         def pause(
-            call: ToolCall, required: ApprovalRequired, paused_history: list[JsonValue]
+            call: ToolCall,
+            required: ApprovalRequired,
+            paused_history: list[JsonValue],
+            provider_usage_available: bool,
+            last_provider_metadata: dict[str, JsonValue],
+            last_model_usage: ModelUsage,
         ) -> None:
             context = self._context_builder.build(
                 task=run.task,
@@ -426,6 +439,9 @@ class AgentRuntime:
                 None,
                 None,
                 None,
+                provider_usage_available=provider_usage_available,
+                last_provider_metadata=last_provider_metadata,
+                last_model_usage=last_model_usage,
             )
 
         host = AgentForgeMiniNativeHost(
@@ -443,6 +459,10 @@ class AgentRuntime:
             workspace=str(self._workspace),
             pause_for_approval=pause,
             history=history,
+            last_test_passed=last_test_passed,
+            provider_usage_available=provider_usage_available,
+            last_provider_metadata=last_provider_metadata,
+            last_model_usage=last_model_usage,
         )
         try:
             engine = MiniNativeRepairEngine(host)
@@ -451,6 +471,7 @@ class AgentRuntime:
                     action=pending_action,
                     history=list(history or []),
                     last_test_passed=last_test_passed,
+                    saved_result=pending_action_result,
                 )
             else:
                 result = await engine.run(
@@ -648,11 +669,36 @@ class AgentRuntime:
             command,
             owner_id=driver.owner_id,
             ttl=self._lease_ttl,
+            allow_running_response_checkpoint=self._has_mini_native_response_checkpoint(
+                command.run_id
+            ),
         )
         if not prepared.owns_command:
             return DriverOutcome(OutcomeStatus.UNKNOWN, None, prepared.disposition.value)
         assert prepared.authority is not None
         prepared_authority = prepared.authority
+        if prepared.approval_id is None:
+
+            async def resume_response_checkpoint(ownership: RunOwnership) -> Run:
+                try:
+                    result = await self._resume_owned(command.run_id, ownership=ownership)
+                except BaseException:
+                    try:
+                        workflow.terminalize(
+                            command, prepared_authority, ReceiptStatus.FAILED
+                        )
+                    except Exception:
+                        workflow.mark_indeterminate(command)
+                    raise
+                workflow.terminalize(command, prepared_authority, ReceiptStatus.COMPLETED)
+                return result
+
+            outcome = await driver.run_outcome(
+                resume_response_checkpoint, authority=prepared.authority
+            )
+            if outcome.outcome is OutcomeStatus.UNKNOWN:
+                workflow.mark_indeterminate(command)
+            return outcome
         assert prepared.approval_id is not None
         assert approval is not None
         assert approval.approval_id == prepared.approval_id
@@ -691,6 +737,22 @@ class AgentRuntime:
             return DriverOutcome(OutcomeStatus.UNKNOWN, None)
         return outcome
 
+    def _has_mini_native_response_checkpoint(self, run_id: UUID) -> bool:
+        if self._repair_engine is not RepairEngineKind.MINI_NATIVE:
+            return False
+        run = self._runs.get(run_id)
+        if run.status is not RunStatus.RUNNING:
+            return False
+        checkpoint = self._checkpoints.latest(run_id)
+        if checkpoint is None:
+            return False
+        snapshot = load_runtime_snapshot(
+            checkpoint.runtime_state,
+            run_id=run_id,
+            step_number=checkpoint.step_number,
+        )
+        return snapshot.mini_native_pending_action is not None
+
     async def _resume_owned(
         self,
         run_id: UUID,
@@ -717,6 +779,10 @@ class AgentRuntime:
                         sanitize_history(snapshot.history),
                         snapshot.mini_native_last_test_passed,
                         snapshot.mini_native_pending_action,
+                        snapshot.provider_usage_available,
+                        snapshot.last_provider_metadata,
+                        snapshot.model_usage,
+                        snapshot.mini_native_pending_action_result,
                     )
         if run.status in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}:
             raise ResumeNotAllowedError(f"{run.status.value} Run cannot resume")
@@ -955,7 +1021,7 @@ class AgentRuntime:
             self._active_runs.discard(run_id)
 
     async def _continue_after_approval(
-        self, ownership: RunOwnership, run: Run, snapshot: RuntimeSnapshotV4
+        self, ownership: RunOwnership, run: Run, snapshot: RuntimeSnapshotV5
     ) -> Run:
         if self._repair_engine is RepairEngineKind.MINI_NATIVE:
             latest_test_passed = (
@@ -968,6 +1034,9 @@ class AgentRuntime:
                 run,
                 sanitize_history(snapshot.history),
                 latest_test_passed,
+                provider_usage_available=snapshot.provider_usage_available,
+                last_provider_metadata=snapshot.last_provider_metadata,
+                last_model_usage=snapshot.model_usage,
             )
         return await self._run_loop(
             ownership,
@@ -1021,7 +1090,7 @@ class AgentRuntime:
         self,
         run_id: UUID,
         approval: ApprovalRequest,
-        snapshot: RuntimeSnapshotV4,
+        snapshot: RuntimeSnapshotV5,
         *,
         ownership: RunOwnership,
         mutation_binding: MutationApprovalBinding | None = None,
@@ -1229,7 +1298,7 @@ class AgentRuntime:
                     }
                 )
             test_execution_state = test_execution.status
-        ready_snapshot = RuntimeSnapshotV4(
+        ready_snapshot = RuntimeSnapshotV5(
             run_id=run_id,
             step_number=snapshot.step_number,
             history=history,
@@ -1243,6 +1312,7 @@ class AgentRuntime:
             loop_state=snapshot.loop_state,
             context_state=built.state,
             last_provider_metadata=snapshot.last_provider_metadata,
+            provider_usage_available=snapshot.provider_usage_available,
             last_model_error=snapshot.last_model_error,
             context_policy_version=snapshot.context_policy_version,
             system_prompt_version=snapshot.system_prompt_version,
@@ -1436,7 +1506,7 @@ class AgentRuntime:
                         checkpoint = self._checkpoints.save(
                             run.run_id,
                             run.current_step,
-                            RuntimeSnapshotV4(
+                            RuntimeSnapshotV5(
                                 run_id=run.run_id,
                                 step_number=run.current_step,
                                 history=list(history),
@@ -1667,7 +1737,7 @@ class AgentRuntime:
                     run.run_id,
                     checkpoint_context.removed_summaries,
                 )
-                snapshot = RuntimeSnapshotV4(
+                snapshot = RuntimeSnapshotV5(
                     run_id=run.run_id,
                     step_number=run.current_step,
                     history=list(history),
@@ -1766,6 +1836,10 @@ class AgentRuntime:
         model_response: ModelResponse | None,
         last_test_result: TestResult | None,
         test_execution_state: ProcessExecutionStatus | None,
+        *,
+        provider_usage_available: bool | None = None,
+        last_provider_metadata: dict[str, JsonValue] | None = None,
+        last_model_usage: ModelUsage | None = None,
     ) -> Run:
         _, workflow = self._require_approval_support()
         approval_id = uuid4()
@@ -1790,7 +1864,7 @@ class AgentRuntime:
                 argv_digest=test_plan.argv_digest,
                 environment_digest=test_plan.environment_digest,
             )
-        snapshot = RuntimeSnapshotV4(
+        snapshot = RuntimeSnapshotV5(
             run_id=run.run_id,
             step_number=run.current_step,
             history=list(history),
@@ -1805,7 +1879,8 @@ class AgentRuntime:
             tool_call_digest=digest,
             resume_phase=ResumePhase.AWAITING_APPROVAL,
             model_usage=(
-                ModelUsage(
+                last_model_usage
+                or ModelUsage(
                     input_tokens=model_state.input_tokens,
                     output_tokens=model_state.output_tokens,
                     total_tokens=model_state.total_tokens,
@@ -1818,7 +1893,16 @@ class AgentRuntime:
             model_request_count=(model_state.model_request_count if model_state is not None else 0),
             loop_state=loop_state,
             context_state=context_state,
-            last_provider_metadata=(model_response.sanitized_metadata if model_response else {}),
+            last_provider_metadata=(
+                last_provider_metadata
+                if last_provider_metadata is not None
+                else (model_response.sanitized_metadata if model_response else {})
+            ),
+            provider_usage_available=(
+                provider_usage_available
+                if provider_usage_available is not None
+                else (model_response.usage is not None if model_response is not None else False)
+            ),
             pending_test_execution=pending_test_execution,
             last_test_result=last_test_result,
             test_execution_state=test_execution_state,
@@ -1892,7 +1976,7 @@ class AgentRuntime:
         self,
         approval: ApprovalRequest,
         expected_phase: ResumePhase,
-    ) -> RuntimeSnapshotV4:
+    ) -> RuntimeSnapshotV5:
         checkpoint: Checkpoint | None = (
             self._checkpoints.get(approval.checkpoint_id)
             if expected_phase is ResumePhase.AWAITING_APPROVAL

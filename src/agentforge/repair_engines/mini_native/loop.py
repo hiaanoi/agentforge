@@ -8,7 +8,7 @@ from pydantic import JsonValue
 
 from agentforge.domain.enums import ToolRisk
 from agentforge.domain.models import ToolSpec
-from agentforge.models.base import FinalAnswer, ModelRequest, ToolCall
+from agentforge.models.base import ModelRequest
 from agentforge.models.domain import ModelResponse
 from agentforge.repair_engines.mini_native.contracts import (
     CandidatePatchResult,
@@ -16,11 +16,11 @@ from agentforge.repair_engines.mini_native.contracts import (
     RepairAction,
     RepairActionKind,
     RepairActionResult,
+    action_history_item,
+    to_repair_action,
 )
 from agentforge.repair_engines.mini_native.host import (
     MiniNativeHost,
-    action_argument_summary,
-    classify_action,
 )
 from agentforge.repair_engines.mini_native.vendor.loop import VendorRepairLoop
 from agentforge.tools.mutation.edit_file import EditFileArguments
@@ -94,21 +94,16 @@ class MiniNativeRepairEngine:
 
         async def execute(response: ModelResponse, step: int) -> bool:
             nonlocal candidate, last_test_passed
-            action = _to_repair_action(
+            action = to_repair_action(
                 response.action,
                 run_id=run_id,
                 step=step,
                 working_directory=working_directory,
                 parent_model_call_id=response.model_call_id,
             )
-            history.append(_action_history_item(action))
+            history.append(action_history_item(action))
             if action.kind is RepairActionKind.FINAL and not last_test_passed:
                 raise ValueError("A passing test is required before submission")
-            await self._host.prepare(
-                action,
-                history=history,
-                last_test_passed=last_test_passed,
-            )
             result = await self._host.execute(action)
             history.append(_result_history_item(action, result))
             if action.kind is RepairActionKind.TEST:
@@ -126,6 +121,7 @@ class MiniNativeRepairEngine:
                     run_id=run_id,
                     step_number=step,
                     history=tuple(compacted_history),
+                    last_test_passed=last_test_passed,
                 )
             )
 
@@ -149,12 +145,13 @@ class MiniNativeRepairEngine:
         action: RepairAction,
         history: list[JsonValue],
         last_test_passed: bool,
+        saved_result: RepairActionResult | None = None,
     ) -> MiniNativeResult:
         """Finish a response checkpoint without requesting the model again."""
         candidate: CandidatePatchResult | None = None
         if action.kind is RepairActionKind.FINAL and not last_test_passed:
             raise ValueError("A passing test is required before submission")
-        result = await self._host.execute(action)
+        result = saved_result or await self._host.execute(action)
         history.append(_result_history_item(action, result))
         if action.kind is RepairActionKind.TEST:
             last_test_passed = result.returncode == 0
@@ -167,6 +164,7 @@ class MiniNativeRepairEngine:
                 run_id=action.run_id,
                 step_number=1,
                 history=tuple(history),
+                last_test_passed=last_test_passed,
             )
         )
         return MiniNativeResult(
@@ -176,52 +174,6 @@ class MiniNativeRepairEngine:
             model_calls=0,
             last_test_passed=last_test_passed,
         )
-
-
-def _to_repair_action(
-    action: ToolCall | FinalAnswer,
-    *,
-    run_id: UUID,
-    step: int,
-    working_directory: str,
-    parent_model_call_id: UUID | None = None,
-) -> RepairAction:
-    if isinstance(action, FinalAnswer):
-        return RepairAction(
-            run_id=run_id,
-            parent_model_call_id=parent_model_call_id,
-            tool_name="submit",
-            working_directory=working_directory,
-            kind=RepairActionKind.FINAL,
-            arguments={"answer": action.answer},
-        )
-    arguments = dict(action.arguments)
-    kind = classify_action(arguments, tool_name=action.tool)
-    approval_key = f"mini-native-step-{step}" if kind is RepairActionKind.WRITE else None
-    return RepairAction(
-        run_id=run_id,
-        parent_model_call_id=parent_model_call_id,
-        tool_name=action.tool,
-        working_directory=working_directory,
-        kind=kind,
-        arguments=arguments,
-        approval_key=approval_key,
-    )
-
-
-def _action_history_item(action: RepairAction) -> JsonValue:
-    return cast(
-        JsonValue,
-        {
-            "kind": "TOOL_CALL",
-            "payload": {
-                "tool_name": action.tool_name,
-                "kind": action.kind.value,
-                "arguments": action_argument_summary(action.arguments),
-            },
-            "call_id": str(action.action_id),
-        },
-    )
 
 
 def _result_history_item(action: RepairAction, result: RepairActionResult) -> JsonValue:

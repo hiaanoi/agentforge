@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from dataclasses import replace
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
+from agentforge.application.run_commands import ResumeRun
 from agentforge.application.runtime_factory import RuntimeComponentFactory
 from agentforge.domain.enums import EventType, RunStatus
+from agentforge.repair_engines.mini_native.agentforge_host import AgentForgeMiniNativeHost
 from agentforge.repair_engines.models import RepairEngineKind
 from tests.integration.test_mini_native_runtime import _create_product_run, _request
 
@@ -45,6 +48,110 @@ async def test_mini_native_resumes_a_durably_saved_response_without_replaying_th
     assert [event.sequence_number for event in events] == list(
         range(1, len(events) + 1)
     )
+
+
+@pytest.mark.asyncio
+async def test_mini_native_checkpoints_before_control_returns_from_generate(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, workspace = _request(tmp_path)
+    components = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    run = _create_product_run(request, workspace)
+    original = AgentForgeMiniNativeHost.generate
+
+    async def interrupt_after_generate(
+        self: AgentForgeMiniNativeHost, *args: Any, **kwargs: Any
+    ) -> object:
+        await original(self, *args, **kwargs)
+        raise RuntimeError("interrupt after generate returns")
+
+    monkeypatch.setattr(AgentForgeMiniNativeHost, "generate", interrupt_after_generate)
+    with pytest.raises(RuntimeError, match="interrupt after generate returns"):
+        await components.runtime.execute(run.run_id)
+
+    monkeypatch.undo()
+    reopened = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    resumed = await reopened.runtime.resume(run.run_id)
+
+    assert resumed.status is RunStatus.WAITING_APPROVAL
+    assert len(request.provider.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_product_resume_command_recovers_a_running_mini_native_response_checkpoint(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, workspace = _request(tmp_path)
+    components = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    run = _create_product_run(request, workspace)
+    original = AgentForgeMiniNativeHost.generate
+
+    async def interrupt_after_generate(
+        self: AgentForgeMiniNativeHost, *args: Any, **kwargs: Any
+    ) -> object:
+        await original(self, *args, **kwargs)
+        raise RuntimeError("interrupt after generate returns")
+
+    monkeypatch.setattr(AgentForgeMiniNativeHost, "generate", interrupt_after_generate)
+    with pytest.raises(RuntimeError, match="interrupt after generate returns"):
+        await components.runtime.execute(run.run_id)
+
+    monkeypatch.undo()
+    reopened = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    outcome = await reopened.runtime.resume(ResumeRun(command_id=uuid4(), run_id=run.run_id))
+
+    assert outcome.value is not None
+    assert outcome.value.status is RunStatus.WAITING_APPROVAL
+    assert len(request.provider.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_mini_native_reuses_a_saved_approval_free_action_result_on_restart(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, workspace = _request(tmp_path)
+    components = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    run = _create_product_run(request, workspace)
+    original = AgentForgeMiniNativeHost.execute
+
+    async def interrupt_after_action_result(
+        self: AgentForgeMiniNativeHost, *args: Any, **kwargs: Any
+    ) -> object:
+        await original(self, *args, **kwargs)
+        raise RuntimeError("interrupt after action result")
+
+    monkeypatch.setattr(AgentForgeMiniNativeHost, "execute", interrupt_after_action_result)
+    with pytest.raises(RuntimeError, match="interrupt after action result"):
+        await components.runtime.execute(run.run_id)
+
+    monkeypatch.undo()
+    reopened = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    original_tool_execute = reopened.runtime._tools.execute
+
+    async def reject_duplicate_read(*args: Any, **kwargs: Any) -> object:
+        if args[1] == "read_file":
+            raise AssertionError("recovery re-executed saved read action")
+        return await original_tool_execute(*args, **kwargs)
+
+    monkeypatch.setattr(reopened.runtime._tools, "execute", reject_duplicate_read)
+    resumed = await reopened.runtime.resume(run.run_id)
+
+    assert resumed.status is RunStatus.WAITING_APPROVAL
 
 
 @pytest.mark.asyncio

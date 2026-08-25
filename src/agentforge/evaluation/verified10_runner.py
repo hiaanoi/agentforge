@@ -22,6 +22,7 @@ from agentforge.application.bootstrap import (
     ProductRuntimeDefinitionLoader,
 )
 from agentforge.application.config import ProductConfigLoader
+from agentforge.domain.enums import EventType
 from agentforge.evaluation.swebench_prediction import SWEbenchInstanceBinding, SWEbenchPrediction
 from agentforge.evaluation.verified10_campaign import (
     AttemptFailureClass,
@@ -1264,7 +1265,16 @@ class Verified10Campaign:
         except Exception:
             unavailable.append("approvals")
         try:
-            values["event_count"] = len(EventRepository(database).list_for_run(identity))
+            events = EventRepository(database).list_for_run(identity)
+            values["event_count"] = len(events)
+            if any(
+                event.event_type is EventType.MODEL_RESPONDED
+                and event.payload.get("usage_available") is False
+                for event in events
+            ):
+                unavailable.append("model_usage")
+                for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                    values.pop(key, None)
         except Exception:
             unavailable.append("events")
         finally:

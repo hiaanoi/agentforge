@@ -22,10 +22,12 @@ from agentforge.repair_engines.mini_native.contracts import (
     RepairAction,
     RepairActionKind,
     RepairActionResult,
+    action_history_item,
+    to_repair_action,
 )
 from agentforge.repair_engines.mini_native.host import bound_output
 from agentforge.runtime.candidate_patch import CandidatePatchPublisher, CandidatePatchStore
-from agentforge.runtime.snapshots import RuntimeSnapshotV4
+from agentforge.runtime.snapshots import RuntimeSnapshotV5
 from agentforge.tools.executor import ToolExecutor
 
 
@@ -51,8 +53,15 @@ class AgentForgeMiniNativeHost:
         candidate_publisher: CandidatePatchPublisher,
         candidate_store: CandidatePatchStore,
         workspace: str,
-        pause_for_approval: Callable[[ToolCall, ApprovalRequired, list[JsonValue]], None],
+        pause_for_approval: Callable[
+            [ToolCall, ApprovalRequired, list[JsonValue], bool, dict[str, JsonValue], ModelUsage],
+            None,
+        ],
         history: list[JsonValue] | None = None,
+        last_test_passed: bool = False,
+        provider_usage_available: bool = False,
+        last_provider_metadata: dict[str, JsonValue] | None = None,
+        last_model_usage: ModelUsage | None = None,
     ) -> None:
         self._run = run
         self._ownership = ownership
@@ -68,8 +77,10 @@ class AgentForgeMiniNativeHost:
         self._workspace = workspace
         self._pause_for_approval = pause_for_approval
         self._history = list(history or [])
-        self._last_usage: ModelUsage | None = None
-        self._provider_usage_available = False
+        self._last_test_passed = last_test_passed
+        self._last_usage = last_model_usage
+        self._provider_usage_available = provider_usage_available
+        self._last_provider_metadata = dict(last_provider_metadata or {})
 
     async def generate(self, request: ModelRequest) -> ModelResponse:
         self._run.current_step += 1
@@ -94,6 +105,7 @@ class AgentForgeMiniNativeHost:
         response = response.model_copy(update={"model_call_id": model_call_id})
         self._last_usage = response.usage
         self._provider_usage_available = response.usage is not None
+        self._last_provider_metadata = dict(response.sanitized_metadata)
         if response.usage is not None:
             self._run.total_token_usage += response.usage.total_tokens or 0
             self._runs.save(self._run, authority=self._ownership.authority)
@@ -108,25 +120,19 @@ class AgentForgeMiniNativeHost:
                     response.usage.model_dump(mode="json") if response.usage is not None else None
                 ),
                 "usage_available": self._provider_usage_available,
-                "provider_metadata": response.sanitized_metadata,
+                "provider_metadata": self._last_provider_metadata,
             },
         )
-        return response
-
-    async def prepare(
-        self,
-        action: RepairAction,
-        *,
-        history: list[JsonValue],
-        last_test_passed: bool,
-    ) -> None:
-        if action.run_id != self._run.run_id:
-            raise ValueError("Mini-native action belongs to another Run")
-        self._history = list(history)
-        self._save_checkpoint(
-            mini_native_pending_action=action,
-            mini_native_last_test_passed=last_test_passed,
+        action = to_repair_action(
+            response.action,
+            run_id=self._run.run_id,
+            step=self._run.current_step,
+            working_directory=self._workspace,
+            parent_model_call_id=response.model_call_id,
         )
+        self._history.append(action_history_item(action))
+        self._save_checkpoint(mini_native_pending_action=action)
+        return response
 
     async def execute(self, action: RepairAction) -> RepairActionResult:
         if action.run_id != self._run.run_id:
@@ -143,22 +149,28 @@ class AgentForgeMiniNativeHost:
         if isinstance(outcome, ApprovalRequired):
             self._pause(action, outcome)
         assert isinstance(outcome, ToolResult)
-        return self._result(action, outcome, started)
+        result = self._result(action, outcome, started)
+        self._save_checkpoint(
+            mini_native_pending_action=action,
+            mini_native_pending_action_result=result,
+        )
+        return result
 
     async def checkpoint(self, state: MiniNativeState) -> None:
         if state.run_id != self._run.run_id:
             raise ValueError("Mini-native checkpoint belongs to another Run")
         self._history = list(state.history)
+        self._last_test_passed = state.last_test_passed
         self._save_checkpoint()
 
     def _save_checkpoint(
         self,
         *,
         mini_native_pending_action: RepairAction | None = None,
-        mini_native_last_test_passed: bool = False,
+        mini_native_pending_action_result: RepairActionResult | None = None,
     ) -> None:
         model_usage = self._model_usage()
-        snapshot = RuntimeSnapshotV4(
+        snapshot = RuntimeSnapshotV5(
             run_id=self._run.run_id,
             step_number=self._run.current_step,
             history=self._history,
@@ -170,8 +182,10 @@ class AgentForgeMiniNativeHost:
                 else 0
             ),
             mini_native_pending_action=mini_native_pending_action,
-            mini_native_last_test_passed=mini_native_last_test_passed,
+            mini_native_pending_action_result=mini_native_pending_action_result,
+            mini_native_last_test_passed=self._last_test_passed,
             provider_usage_available=self._provider_usage_available,
+            last_provider_metadata=self._last_provider_metadata,
         )
         checkpoint = self._checkpoints.save(
             self._run.run_id,
@@ -244,7 +258,14 @@ class AgentForgeMiniNativeHost:
             arguments=action.arguments,
             reason=f"Mini-native {action.kind.value.lower()} action requires approval",
         )
-        self._pause_for_approval(queued, required, list(self._history))
+        self._pause_for_approval(
+            queued,
+            required,
+            list(self._history),
+            self._provider_usage_available,
+            self._last_provider_metadata,
+            self._model_usage(),
+        )
         raise MiniNativeApprovalPaused()
 
     def _result(

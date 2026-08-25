@@ -10,7 +10,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
-from agentforge.models.base import ModelRequest
+from agentforge.models.base import FinalAnswer, ModelRequest, ToolCall
 from agentforge.models.domain import ModelResponse
 
 
@@ -99,6 +99,7 @@ class MiniNativeState(BaseModel):
     run_id: UUID
     step_number: int = Field(gt=0)
     history: tuple[JsonValue, ...] = ()
+    last_test_passed: bool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -156,6 +157,78 @@ def sanitize_history(history: list[JsonValue]) -> list[JsonValue]:
     return [_bound_history_item(item) for item in history[-100:]]
 
 
+def to_repair_action(
+    action: ToolCall | FinalAnswer,
+    *,
+    run_id: UUID,
+    step: int,
+    working_directory: str,
+    parent_model_call_id: UUID | None = None,
+) -> RepairAction:
+    if isinstance(action, FinalAnswer):
+        return RepairAction(
+            run_id=run_id,
+            parent_model_call_id=parent_model_call_id,
+            tool_name="submit",
+            working_directory=working_directory,
+            kind=RepairActionKind.FINAL,
+            arguments={"answer": action.answer},
+        )
+    arguments = dict(action.arguments)
+    kind = _classify_action(arguments, tool_name=action.tool)
+    approval_key = f"mini-native-step-{step}" if kind is RepairActionKind.WRITE else None
+    return RepairAction(
+        run_id=run_id,
+        parent_model_call_id=parent_model_call_id,
+        tool_name=action.tool,
+        working_directory=working_directory,
+        kind=kind,
+        arguments=arguments,
+        approval_key=approval_key,
+    )
+
+
+def action_history_item(action: RepairAction) -> JsonValue:
+    return cast(
+        JsonValue,
+        {
+            "kind": "TOOL_CALL",
+            "payload": {
+                "tool_name": action.tool_name,
+                "kind": action.kind.value,
+                "arguments": _redact(action.arguments),
+            },
+            "call_id": str(action.action_id),
+        },
+    )
+
+
+def _classify_action(
+    arguments: dict[str, Any], *, tool_name: str | None = None
+) -> RepairActionKind:
+    registered_kind = {
+        "read_file": RepairActionKind.READ,
+        "edit_file": RepairActionKind.WRITE,
+        "write_file": RepairActionKind.WRITE,
+        "run_tests": RepairActionKind.TEST,
+    }.get(tool_name) if tool_name is not None else None
+    if registered_kind is not None:
+        return registered_kind
+    raw = arguments.get("kind", arguments.get("action", arguments.get("type")))
+    if isinstance(raw, str):
+        try:
+            return RepairActionKind(raw.upper())
+        except ValueError:
+            pass
+    if any(key in arguments for key in ("content", "new_content", "patch", "edits")):
+        return RepairActionKind.WRITE
+    if any(key in arguments for key in ("command", "cmd", "test", "tests")):
+        return RepairActionKind.TEST
+    if any(key in arguments for key in ("answer", "final")):
+        return RepairActionKind.FINAL
+    return RepairActionKind.READ
+
+
 def _action_id(action: RepairAction) -> UUID:
     from uuid import uuid5
 
@@ -174,5 +247,7 @@ __all__ = [
     "RepairAction",
     "RepairActionKind",
     "RepairActionResult",
+    "action_history_item",
     "sanitize_history",
+    "to_repair_action",
 ]

@@ -9,12 +9,13 @@ from agentforge.runtime.snapshots import (
     RepairSnapshotState,
     RuntimeSnapshotV3,
     RuntimeSnapshotV4,
+    RuntimeSnapshotV5,
     SnapshotVersionError,
     load_runtime_snapshot,
 )
 
 
-def test_v3_migrates_to_v4_without_enabling_repair_mode() -> None:
+def test_v3_migrates_to_v5_without_enabling_repair_mode() -> None:
     legacy = RuntimeSnapshotV3(
         run_id=uuid4(),
         step_number=2,
@@ -27,11 +28,11 @@ def test_v3_migrates_to_v4_without_enabling_repair_mode() -> None:
         step_number=legacy.step_number,
     )
 
-    assert loaded.schema_version == 4
+    assert loaded.schema_version == 5
     assert loaded.repair is None
 
 
-def test_v4_round_trip_binds_safe_repair_recovery_state() -> None:
+def test_v4_upgrades_to_v5_with_safe_repair_recovery_state() -> None:
     snapshot = RuntimeSnapshotV4(
         run_id=uuid4(),
         step_number=3,
@@ -66,7 +67,8 @@ def test_v4_round_trip_binds_safe_repair_recovery_state() -> None:
     )
     serialized = loaded.model_dump_json().casefold()
 
-    assert loaded == snapshot
+    assert loaded.schema_version == 5
+    assert loaded.repair == snapshot.repair
     for forbidden in (
         "api_key",
         "allowed_env",
@@ -80,7 +82,7 @@ def test_v4_round_trip_binds_safe_repair_recovery_state() -> None:
         assert forbidden not in serialized
 
 
-def test_v4_rejects_unknown_or_sensitive_fields() -> None:
+def test_v4_and_v5_reject_unknown_or_sensitive_fields() -> None:
     with pytest.raises(ValidationError):
         RuntimeSnapshotV4.model_validate(
             {
@@ -93,7 +95,26 @@ def test_v4_rejects_unknown_or_sensitive_fields() -> None:
         )
     with pytest.raises(SnapshotVersionError):
         load_runtime_snapshot(
-            {"schema_version": 5},
+            {"schema_version": 6},
             run_id=uuid4(),
             step_number=1,
+        )
+    with pytest.raises(ValidationError):
+        RuntimeSnapshotV5.model_validate(
+            {
+                "schema_version": 5,
+                "run_id": str(uuid4()),
+                "step_number": 1,
+                "resume_phase": "READY_FOR_MODEL",
+                "hidden_test": "secret",
+            }
+        )
+    with pytest.raises(ValidationError):
+        RuntimeSnapshotV4.model_validate(
+            RuntimeSnapshotV5(
+                run_id=uuid4(),
+                step_number=1,
+                resume_phase=ResumePhase.READY_FOR_MODEL,
+                provider_usage_available=True,
+            ).model_dump(mode="json")
         )

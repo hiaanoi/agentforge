@@ -5,8 +5,6 @@ import re
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID, uuid5
 
-from pydantic import JsonValue
-
 from agentforge.models.base import ModelRequest
 from agentforge.models.domain import ModelResponse
 from agentforge.repair_engines.mini_native.contracts import (
@@ -29,14 +27,6 @@ MAX_OUTPUT_CHARS = 20_000
 @runtime_checkable
 class MiniNativeHost(Protocol):
     async def generate(self, request: ModelRequest) -> ModelResponse: ...
-
-    async def prepare(
-        self,
-        action: RepairAction,
-        *,
-        history: list[JsonValue],
-        last_test_passed: bool,
-    ) -> None: ...
 
     async def execute(self, action: RepairAction) -> RepairActionResult: ...
 

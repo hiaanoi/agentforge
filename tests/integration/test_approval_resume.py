@@ -564,7 +564,7 @@ async def test_expired_model_crash_resumes_model_over_historical_side_effect_bin
 
 
 @pytest.mark.asyncio
-async def test_approval_snapshots_use_v3_and_preserve_recovery_state(
+async def test_approval_snapshots_use_v5_and_preserve_recovery_state(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "approval-v2.sqlite3"
@@ -577,7 +577,7 @@ async def test_approval_snapshots_use_v3_and_preserve_recovery_state(
     checkpoints = CheckpointRepository(database)
     pending = checkpoints.get(approval.checkpoint_id)
     assert pending is not None
-    assert pending.runtime_state["schema_version"] == 4
+    assert pending.runtime_state["schema_version"] == 5
 
     expected_loop = LoopState(warning_count=1)
     expected_context = ResumeContextState(
@@ -599,7 +599,7 @@ async def test_approval_snapshots_use_v3_and_preserve_recovery_state(
 
     ready = checkpoints.latest(run.run_id)
     assert ready is not None
-    assert ready.runtime_state["schema_version"] == 4
+    assert ready.runtime_state["schema_version"] == 5
     assert ready.runtime_state["loop_state"] == expected_loop.model_dump(mode="json")
     assert ready.runtime_state["context_state"]["item_count"] == 2
     assert (

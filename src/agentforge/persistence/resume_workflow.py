@@ -107,6 +107,7 @@ class ResumeRunWorkflow:
         ttl: timedelta = timedelta(seconds=30),
         decision_claimer: ResumeDecisionClaimer | None = None,
         failpoint: ResumeFailpoint | None = None,
+        allow_running_response_checkpoint: bool = False,
     ) -> ResumePreparation:
         with ApplicationUnitOfWork(self._database) as uow:
             session = uow.session
@@ -134,7 +135,12 @@ class ResumeRunWorkflow:
                 )
                 .limit(1)
             )
-            if approval is None:
+            response_checkpoint_recovery = (
+                approval is None
+                and allow_running_response_checkpoint
+                and run.status == RunStatus.RUNNING.value
+            )
+            if approval is None and not response_checkpoint_recovery:
                 rejected = self._receipts.fail(
                     session, command.command_id, at=utc_now()
                 )
@@ -149,24 +155,31 @@ class ResumeRunWorkflow:
                 )
                 uow.commit()
                 return result
-            try:
-                phase = self._phase(session, command, approval)
-            except ResumeNotAllowedError:
-                rejected = self._receipts.fail(
-                    session, command.command_id, at=utc_now()
-                )
-                result = ResumePreparation(
-                    receipt=rejected,
-                    authority=None,
-                    approval_id=UUID(approval.approval_id),
-                    phase=None,
-                    execution_phase="",
-                    side_effect_claimed_now=False,
-                    disposition=ResumePrepareDisposition.REJECTED,
-                )
-                uow.commit()
-                return result
-            resolved_execution_phase = phase.value
+            if response_checkpoint_recovery:
+                phase = None
+            else:
+                assert approval is not None
+                try:
+                    phase = self._phase(session, command, approval)
+                except ResumeNotAllowedError:
+                    rejected = self._receipts.fail(
+                        session, command.command_id, at=utc_now()
+                    )
+                    result = ResumePreparation(
+                        receipt=rejected,
+                        authority=None,
+                        approval_id=UUID(approval.approval_id),
+                        phase=None,
+                        execution_phase="",
+                        side_effect_claimed_now=False,
+                        disposition=ResumePrepareDisposition.REJECTED,
+                    )
+                    uow.commit()
+                    return result
+            resolved_execution_phase = (
+                "RESPONSE_CHECKPOINT" if phase is None else phase.value
+            )
+            approval_id = UUID(approval.approval_id) if approval is not None else None
             watermark = self._watermark(session, command, receipt)
 
             if run.status == RunStatus.RUNNING.value:
@@ -176,7 +189,7 @@ class ResumeRunWorkflow:
                         result = ResumePreparation(
                             receipt=receipt,
                             authority=current.authority,
-                            approval_id=UUID(approval.approval_id),
+                            approval_id=approval_id,
                             phase=phase,
                             execution_phase=resolved_execution_phase,
                             side_effect_claimed_now=False,
@@ -197,7 +210,7 @@ class ResumeRunWorkflow:
                     result = ResumePreparation(
                         receipt=receipt,
                         authority=current.authority,
-                        approval_id=UUID(approval.approval_id),
+                        approval_id=approval_id,
                         phase=phase,
                         execution_phase=resolved_execution_phase,
                         side_effect_claimed_now=False,
@@ -235,7 +248,7 @@ class ResumeRunWorkflow:
                 result = ResumePreparation(
                     receipt=rejected,
                     authority=None,
-                    approval_id=UUID(approval.approval_id),
+                    approval_id=approval_id,
                     phase=phase,
                     execution_phase=resolved_execution_phase,
                     side_effect_claimed_now=False,
@@ -249,11 +262,13 @@ class ResumeRunWorkflow:
             )
             authority = lease.authority
             self._leases.claim_write(session, authority)
-            needs_claim = (
-                approval.consumption_state
-                == ApprovalConsumptionState.NOT_STARTED.value
+            needs_claim = approval is not None and (
+                approval.consumption_state == ApprovalConsumptionState.NOT_STARTED.value
             )
+            if needs_claim:
+                assert approval is not None
             if needs_claim and phase is ResumeRecoveryChoice.DECISION:
+                assert approval is not None
                 if decision_claimer is None:
                     from agentforge.persistence.approval_workflow import ApprovalWorkflow
 
@@ -269,6 +284,7 @@ class ResumeRunWorkflow:
                 ResumeRecoveryChoice.MUTATION,
                 ResumeRecoveryChoice.TEST_EXECUTION,
             }:
+                assert approval is not None
                 phase_claimer = self._phase_claimers[phase]
                 if phase_claimer is None:
                     raise ResumeNotAllowedError(
@@ -299,8 +315,8 @@ class ResumeRunWorkflow:
                     authority,
                     EventType.RUN_RESUMED,
                     {
-                        "approval_id": approval.approval_id,
-                        "phase": phase.value,
+                        "approval_id": approval.approval_id if approval is not None else None,
+                        "phase": resolved_execution_phase,
                         "command_id": str(command.command_id),
                         "lease_token": str(authority.lease_token),
                         "fencing_token": authority.fencing_token,
@@ -313,7 +329,7 @@ class ResumeRunWorkflow:
             result = ResumePreparation(
                 receipt=receipt,
                 authority=authority,
-                approval_id=UUID(approval.approval_id),
+                approval_id=approval_id,
                 phase=phase,
                 execution_phase=resolved_execution_phase,
                 side_effect_claimed_now=needs_claim,
