@@ -132,6 +132,8 @@ async def test_mini_native_loop_retries_after_a_failed_test_before_submission() 
     tools = {tool.name: tool for tool in host.requests[0].tools}
     assert tools["edit_file"].input_schema == EditFileArguments.model_json_schema()
     assert tools["run_tests"].input_schema == RunTestsArguments.model_json_schema()
+    assert {"list_files", "search_text"}.issubset(tools)
+    assert "Recommended workflow" in host.requests[0].instructions
     assert tools["edit_file"].requires_approval
     assert tools["run_tests"].requires_approval
 

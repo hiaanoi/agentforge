@@ -24,15 +24,40 @@ from agentforge.repair_engines.mini_native.host import (
 )
 from agentforge.repair_engines.mini_native.vendor.loop import VendorRepairLoop
 from agentforge.tools.mutation.edit_file import EditFileArguments
+from agentforge.tools.repository.list_files import ListFilesArguments
 from agentforge.tools.repository.read_file import ReadFileArguments
+from agentforge.tools.repository.search_text import SearchTextArguments
 from agentforge.tools.testing.run_tests import RunTestsArguments
 
-_SYSTEM_PROMPT = "You are a helpful assistant that can interact with a computer to repair code."
+_SYSTEM_PROMPT = """You are a helpful assistant that can interact with a computer to repair code.
+
+Recommended workflow:
+1. Use list_files and search_text to locate the relevant implementation and tests.
+2. Read only the relevant file sections.
+3. Edit the source with an exact old_text/new_text replacement.
+4. Run the focused test profile and use its output to iterate.
+5. After a passing test, submit the verified repair.
+
+Do not repeatedly read the same slices without changing the plan. Keep edits small and exact."""
 _TOOLS = [
+    ToolSpec(
+        name="list_files",
+        description="List non-sensitive files within the candidate workspace",
+        input_schema=ListFilesArguments.model_json_schema(),
+        risk_level=ToolRisk.READ,
+        requires_approval=False,
+    ),
     ToolSpec(
         name="read_file",
         description="Read a file from the candidate workspace",
         input_schema=ReadFileArguments.model_json_schema(),
+        risk_level=ToolRisk.READ,
+        requires_approval=False,
+    ),
+    ToolSpec(
+        name="search_text",
+        description="Search text within the candidate workspace",
+        input_schema=SearchTextArguments.model_json_schema(),
         risk_level=ToolRisk.READ,
         requires_approval=False,
     ),
