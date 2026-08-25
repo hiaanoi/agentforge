@@ -64,6 +64,14 @@ def test_result_preserves_returncode_bounded_output_and_duration() -> None:
     assert len(
         RepairActionResult(returncode=0, stdout="x" * 30_000, duration_ms=0).stdout
     ) <= 20_000
+    safe = RepairActionResult(
+        returncode=0,
+        stdout="sk-live-secret-value",
+        stderr="Bearer bearer-secret-value",
+        duration_ms=0,
+    )
+    assert "sk-live-secret-value" not in safe.stdout
+    assert "bearer-secret-value" not in safe.stderr
 
 
 def test_argument_summary_is_secret_safe_and_id_is_deterministic() -> None:
@@ -111,6 +119,10 @@ def test_state_history_is_bounded_and_redacted() -> None:
     state = MiniNativeState(run_id=uuid4(), step_number=1, history=[{"api_key": "secret"}] * 101)
     assert len(state.history) == 100
     assert "secret" not in state.model_dump_json()
+    literal_state = MiniNativeState(
+        run_id=uuid4(), step_number=1, history=[{"message": "token-live-secret-value"}]
+    )
+    assert "token-live-secret-value" not in literal_state.model_dump_json()
 
 
 def test_protocol_is_runtime_checkable_shape() -> None:

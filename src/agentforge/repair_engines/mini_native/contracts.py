@@ -3,8 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from enum import StrEnum
-from typing import Any, cast
+from typing import Any, Self, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -41,9 +42,20 @@ class RepairAction(BaseModel):
         object.__setattr__(self, "arguments_digest", digest)
         if self.kind is RepairActionKind.WRITE and not (self.approval_key or "").strip():
             raise ValueError("write actions require a non-empty approval key")
-        if self.action_id is None:
-            object.__setattr__(self, "action_id", _action_id(self))
+        expected_action_id = _action_id(self)
+        if self.action_id is not None and self.action_id != expected_action_id:
+            raise ValueError("action_id does not match action identity")
+        object.__setattr__(self, "action_id", expected_action_id)
         return self
+
+    def model_copy(
+        self, *, update: Mapping[str, Any] | None = None, deep: bool = False
+    ) -> Self:
+        data = self.model_dump()
+        if update:
+            data.update(update)
+        data.pop("action_id", None)
+        return type(self).model_validate(data)
 
     @property
     def approval_binding_digest(self) -> str:
@@ -107,6 +119,10 @@ class CandidatePatchResult(BaseModel):
 
 
 _SECRET_KEY = re.compile(r"(?:api[_-]?key|token|secret|password|authorization|credential)", re.I)
+_SECRET_VALUE = re.compile(
+    r"(?:sk-[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._-]{8,}|token-[A-Za-z0-9._-]{8,})",
+    re.I,
+)
 
 
 def _redact(value: Any, key: str | None = None) -> Any:
@@ -116,6 +132,8 @@ def _redact(value: Any, key: str | None = None) -> Any:
         return {str(k): _redact(v, str(k)) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_redact(item) for item in value]
+    if isinstance(value, str):
+        return _SECRET_VALUE.sub("<redacted>", value)
     return value
 
 
