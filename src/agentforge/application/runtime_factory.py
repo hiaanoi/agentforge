@@ -324,12 +324,18 @@ class RuntimeComponentFactory:
                     canonical_root=resolver.workspace,
                     security=mutation_security,
                 )
-                if request.repair_engine is RepairEngineKind.MINI_LINEAR
+                if request.repair_engine in {
+                    RepairEngineKind.MINI_LINEAR,
+                    RepairEngineKind.MINI_NATIVE,
+                }
                 else None
             ),
             candidate_store=(
                 CandidatePatchStore(resolver.workspace)
-                if request.repair_engine is RepairEngineKind.MINI_LINEAR
+                if request.repair_engine in {
+                    RepairEngineKind.MINI_LINEAR,
+                    RepairEngineKind.MINI_NATIVE,
+                }
                 else None
             ),
         )
@@ -426,7 +432,10 @@ class RuntimeComponentFactory:
         ]
         if policy.allow_file_creation:
             tools.append(WriteFileTool(mutation_security))
-        if repair_engine is RepairEngineKind.MINI_LINEAR:
+        if repair_engine in {
+            RepairEngineKind.MINI_LINEAR,
+            RepairEngineKind.MINI_NATIVE,
+        }:
             publisher = CandidatePatchPublisher(
                 canonical_root=resolver.workspace,
                 security=mutation_security,

@@ -303,6 +303,10 @@ class AgentRuntime:
         run = self._runs.get(run_id)
         if run.status is not RunStatus.CREATED:
             raise ResumeNotAllowedError("Only a CREATED Run can execute from the beginning")
+        if self._repair_engine is RepairEngineKind.MINI_NATIVE:
+            raise RuntimeError(
+                "Mini native runtime is registered but not wired yet"
+            )
         run.transition_to(RunStatus.RUNNING)
         authority = self._authority(ownership, run.run_id)
         self._runs.save(run, authority=authority)

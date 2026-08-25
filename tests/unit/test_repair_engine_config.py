@@ -1,9 +1,16 @@
+import asyncio
 from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
+
+import pytest
 
 from agentforge.application.bootstrap import ProductRuntimeDefinitionLoader
 from agentforge.application.config import ProductConfigLoader
+from agentforge.domain.enums import RunStatus
 from agentforge.evaluation.verified10_support import agentforge_config, agentforge_runtime
 from agentforge.repair_engines.models import RepairEngineKind
+from agentforge.runtime.engine import AgentRuntime
 
 
 def _load_runtime(tmp_path: Path, *, engine: str):
@@ -41,3 +48,18 @@ def test_runtime_definition_accepts_mini_native_engine(tmp_path: Path) -> None:
 
     assert definition.repair_engine is RepairEngineKind.MINI_NATIVE
     assert definition.repair_engine is not RepairEngineKind.MINI_LINEAR
+
+
+def test_mini_native_does_not_fall_through_to_native_loop() -> None:
+    run_id = uuid4()
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime._repair_engine = RepairEngineKind.MINI_NATIVE
+    runtime._runs = SimpleNamespace(
+        get=lambda requested_run_id: SimpleNamespace(
+            run_id=requested_run_id,
+            status=RunStatus.CREATED,
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="registered but not wired yet"):
+        asyncio.run(runtime._execute_owned(run_id, ownership=None))
