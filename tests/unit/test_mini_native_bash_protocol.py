@@ -31,3 +31,14 @@ def test_observation_formatter_preserves_short_and_long_output():
 def test_submit_marker_is_detected_only_as_first_output_line():
     assert parse_submit_output("COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\npatch") == "patch"
     assert parse_submit_output("prefix\nCOMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT") is None
+    assert parse_submit_output("\nCOMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\npatch") is None
+    assert parse_submit_output(" COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\npatch") is None
+
+
+def test_instance_template_contains_frozen_workflow_sections():
+    from agentforge.repair_engines.mini_native.vendor.bash_protocol import BASH_INSTANCE_TEMPLATE
+
+    assert "## Recommended Workflow" in BASH_INSTANCE_TEMPLATE
+    assert "## Command Execution Rules" in BASH_INSTANCE_TEMPLATE
+    assert "<system_information>" in BASH_INSTANCE_TEMPLATE
+    assert "{{task}}" in BASH_INSTANCE_TEMPLATE
