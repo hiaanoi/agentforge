@@ -1,7 +1,7 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
 from agentforge.context.models import ContextItem, ContextItemKind, LoopState, ResumeContextState
 from agentforge.domain.enums import ProcessExecutionStatus, ResumePhase
@@ -113,6 +113,14 @@ class RuntimeSnapshotV4(BaseModel):
     repair: RepairSnapshotState | None = None
 
 
+class _RuntimeSnapshotV4MiniNative(RuntimeSnapshotV4):
+    """The short-lived V4 shape emitted by mini-native before the V5 migration."""
+
+    mini_native_pending_action: RepairAction | None = None
+    mini_native_last_test_passed: bool = False
+    provider_usage_available: bool = False
+
+
 class RuntimeSnapshotV5(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -197,7 +205,10 @@ def load_runtime_snapshot(
             raise SnapshotVersionError("Snapshot identity does not match checkpoint")
         return _upgrade_v3(snapshot_v3)
     if raw_version == 4:
-        snapshot_v4 = RuntimeSnapshotV4.model_validate(state)
+        try:
+            snapshot_v4 = RuntimeSnapshotV4.model_validate(state)
+        except ValidationError:
+            snapshot_v4 = _RuntimeSnapshotV4MiniNative.model_validate(state)
         if snapshot_v4.run_id != run_id or snapshot_v4.step_number != step_number:
             raise SnapshotVersionError("Snapshot identity does not match checkpoint")
         return _upgrade_v4(snapshot_v4)
@@ -254,7 +265,9 @@ def _upgrade_v3(snapshot: RuntimeSnapshotV3) -> RuntimeSnapshotV5:
     )
 
 
-def _upgrade_v4(snapshot: RuntimeSnapshotV4) -> RuntimeSnapshotV5:
+def _upgrade_v4(
+    snapshot: RuntimeSnapshotV4 | _RuntimeSnapshotV4MiniNative,
+) -> RuntimeSnapshotV5:
     return RuntimeSnapshotV5(
         run_id=snapshot.run_id,
         step_number=snapshot.step_number,
@@ -276,4 +289,7 @@ def _upgrade_v4(snapshot: RuntimeSnapshotV4) -> RuntimeSnapshotV5:
         last_test_result=snapshot.last_test_result,
         test_execution_state=snapshot.test_execution_state,
         repair=snapshot.repair,
+        mini_native_pending_action=getattr(snapshot, "mini_native_pending_action", None),
+        mini_native_last_test_passed=getattr(snapshot, "mini_native_last_test_passed", False),
+        provider_usage_available=getattr(snapshot, "provider_usage_available", False),
     )

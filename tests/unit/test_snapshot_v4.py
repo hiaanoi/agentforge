@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from agentforge.domain.enums import ResumePhase
 from agentforge.domain.repair import RepairCompletionStatus
+from agentforge.repair_engines.mini_native.contracts import RepairAction, RepairActionKind
 from agentforge.runtime.snapshots import (
     RepairSnapshotState,
     RuntimeSnapshotV3,
@@ -80,6 +81,34 @@ def test_v4_upgrades_to_v5_with_safe_repair_recovery_state() -> None:
         "stderr_summary",
     ):
         assert forbidden not in serialized
+
+
+def test_real_pre_v5_mini_native_v4_payload_upgrades_without_losing_recovery_state() -> None:
+    run_id = uuid4()
+    action = RepairAction(
+        run_id=run_id,
+        tool_name="read_file",
+        working_directory=".",
+        kind=RepairActionKind.READ,
+        arguments={"path": "src/value.py"},
+    )
+    payload = RuntimeSnapshotV4(
+        run_id=run_id,
+        step_number=1,
+        resume_phase=ResumePhase.READY_FOR_MODEL,
+    ).model_dump(mode="json")
+    payload.update(
+        mini_native_pending_action=action.model_dump(mode="json"),
+        mini_native_last_test_passed=True,
+        provider_usage_available=True,
+    )
+
+    loaded = load_runtime_snapshot(payload, run_id=run_id, step_number=1)
+
+    assert loaded.schema_version == 5
+    assert loaded.mini_native_pending_action == action
+    assert loaded.mini_native_last_test_passed
+    assert loaded.provider_usage_available
 
 
 def test_v4_and_v5_reject_unknown_or_sensitive_fields() -> None:
