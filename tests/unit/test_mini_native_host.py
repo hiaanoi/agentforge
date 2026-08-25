@@ -1,4 +1,4 @@
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -13,6 +13,7 @@ from agentforge.repair_engines.mini_native.contracts import (
 from agentforge.repair_engines.mini_native.host import (
     MiniNativeHost,
     action_argument_summary,
+    bound_output,
     classify_action,
     deterministic_action_id,
 )
@@ -33,16 +34,26 @@ def test_action_classification(arguments: dict[str, object], expected: RepairAct
 
 def test_write_requires_non_empty_approval_key() -> None:
     with pytest.raises(ValidationError):
-        RepairAction(kind=RepairActionKind.WRITE, arguments={"path": "x"})
+        RepairAction(
+            run_id=uuid4(), tool_name="edit", working_directory=".",
+            kind=RepairActionKind.WRITE, arguments={"path": "x"},
+        )
     with pytest.raises(ValidationError):
-        RepairAction(kind=RepairActionKind.WRITE, arguments={"path": "x"}, approval_key=" ")
+        RepairAction(
+            run_id=uuid4(), tool_name="edit", working_directory=".",
+            kind=RepairActionKind.WRITE, arguments={"path": "x"}, approval_key=" ",
+        )
 
     action = RepairAction(
+        run_id=UUID("00000000-0000-0000-0000-000000000001"),
+        tool_name="edit",
+        working_directory=".",
         kind=RepairActionKind.WRITE,
         arguments={"path": "x", "content": "secret"},
         approval_key="approval-1",
     )
     assert action.approval_key == "approval-1"
+    assert action.approval_binding_digest
 
 
 def test_result_preserves_returncode_bounded_output_and_duration() -> None:
@@ -65,6 +76,41 @@ def test_argument_summary_is_secret_safe_and_id_is_deterministic() -> None:
     first_id = deterministic_action_id(RepairActionKind.READ, {"path": "src/app.py"})
     second_id = deterministic_action_id(RepairActionKind.READ, {"path": "src/app.py"})
     assert first_id == second_id
+
+
+def test_identity_binds_action_to_run_and_reordered_args_are_stable() -> None:
+    run_id = UUID("00000000-0000-0000-0000-000000000001")
+    first = RepairAction(
+        run_id=run_id, tool_name="edit", working_directory=".", kind=RepairActionKind.WRITE,
+        arguments={"path": "x", "content": "y"}, approval_key="approval-1",
+    )
+    reordered = RepairAction(
+        run_id=run_id, tool_name="edit", working_directory=".", kind=RepairActionKind.WRITE,
+        arguments={"content": "y", "path": "x"}, approval_key="approval-1",
+    )
+    other_run = first.model_copy(update={"run_id": uuid4()})
+    assert first.action_id == reordered.action_id
+    assert first.approval_binding_digest == reordered.approval_binding_digest
+    assert first.approval_binding_digest != other_run.approval_binding_digest
+
+
+def test_bound_output_redacts_nested_secrets_and_validates_limit() -> None:
+    output, truncated = bound_output("prefix sk-live-secret-value suffix", limit=100)
+    assert output == "prefix <redacted> suffix"
+    assert not truncated
+    stderr, truncated = bound_output("x" * 10, limit=4)
+    assert stderr == "xxxx"
+    assert truncated
+    with pytest.raises(ValueError):
+        bound_output("x", limit=-1)
+
+
+def test_state_history_is_bounded_and_redacted() -> None:
+    from agentforge.repair_engines.mini_native.contracts import MiniNativeState
+
+    state = MiniNativeState(run_id=uuid4(), step_number=1, history=[{"api_key": "secret"}] * 101)
+    assert len(state.history) == 100
+    assert "secret" not in state.model_dump_json()
 
 
 def test_protocol_is_runtime_checkable_shape() -> None:

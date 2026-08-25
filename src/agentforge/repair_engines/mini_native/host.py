@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 from uuid import UUID, uuid5
 
 from agentforge.models.base import ModelRequest
@@ -17,9 +17,11 @@ from agentforge.repair_engines.mini_native.contracts import (
 
 _ACTION_NAMESPACE = UUID("5a4c0d2e-a8a0-4cbb-9fb0-5cc7ec2ad6ed")
 _SECRET_KEY = re.compile(r"(?:api[_-]?key|token|secret|password|authorization|credential)", re.I)
+_SECRET_VALUE = re.compile(r"(?:sk-[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._-]{8,})")
 MAX_OUTPUT_CHARS = 20_000
 
 
+@runtime_checkable
 class MiniNativeHost(Protocol):
     async def generate(self, request: ModelRequest) -> ModelResponse: ...
 
@@ -58,9 +60,10 @@ def deterministic_action_id(kind: RepairActionKind, arguments: dict[str, Any]) -
 
 
 def bound_output(value: str, *, limit: int = MAX_OUTPUT_CHARS) -> tuple[str, bool]:
-    if len(value) <= limit:
-        return value, False
-    return value[:limit], True
+    if limit < 0:
+        raise ValueError("output limit must be non-negative")
+    safe = _redact(value)
+    return (safe, False) if len(safe) <= limit else (safe[:limit], True)
 
 
 def _redact(value: Any, key: str | None = None) -> Any:
@@ -70,6 +73,8 @@ def _redact(value: Any, key: str | None = None) -> Any:
         return {str(k): _redact(v, str(k)) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_redact(item) for item in value]
+    if isinstance(value, str):
+        return _SECRET_VALUE.sub("<redacted>", value)
     return value
 
 
