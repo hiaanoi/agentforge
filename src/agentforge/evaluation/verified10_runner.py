@@ -90,7 +90,11 @@ class Verified10Campaign:
         self._agentforge_max_total_tokens = (
             600000 if self.protocol.agentforge_budget.logical_model_calls == 50 else 1200000
         )
-        self._active_repair_engine: Literal["native", "mini_linear"] = "native"
+        self._active_repair_engine: Literal["native", "mini_linear", "mini_native"] = (
+            "mini_native"
+            if self.protocol.protocol_name.endswith("-mini-native-canary")
+            else "native"
+        )
         self._active_provider_kind: Literal["deepseek", "openai"] = "deepseek"
         self._active_model: str = self.protocol.model
 
@@ -471,11 +475,14 @@ class Verified10Campaign:
         recover_running: bool = False,
         retry_failed: bool = False,
         task_ids: tuple[str, ...] | None = None,
-        repair_engine: Literal["native", "mini_linear"] = "native",
+        repair_engine: Literal["native", "mini_linear", "mini_native"] | None = None,
         provider_kind: Literal["deepseek", "openai"] = "deepseek",
         model: str | None = None,
     ) -> None:
-        self._active_repair_engine = repair_engine
+        selected_engine: Literal["native", "mini_linear", "mini_native"] = (
+            repair_engine or self._active_repair_engine
+        )
+        self._active_repair_engine = selected_engine
         self._active_provider_kind = provider_kind
         self._active_model = model or self.protocol.model
         if not self._active_model:
@@ -487,7 +494,7 @@ class Verified10Campaign:
             retry_failed=retry_failed,
             mini_root=None,
             tasks=tasks,
-            repair_engine=repair_engine,
+            repair_engine=selected_engine,
         )
 
     def _select_tasks(self, task_ids: tuple[str, ...] | None) -> tuple[Verified10Task, ...]:
@@ -527,7 +534,7 @@ class Verified10Campaign:
         retry_failed: bool,
         mini_root: Path | None,
         tasks: tuple[Verified10Task, ...] | None = None,
-        repair_engine: Literal["native", "mini_linear"] = "native",
+        repair_engine: Literal["native", "mini_linear", "mini_native"] = "native",
     ) -> None:
         if retry_failed:
             raise CampaignExecutionError("Protocol permits one attempt; --retry-failed is invalid")
@@ -615,7 +622,7 @@ class Verified10Campaign:
         state: CampaignState,
         mini_root: Path | None,
         started: float,
-        repair_engine: Literal["native", "mini_linear"],
+        repair_engine: Literal["native", "mini_linear", "mini_native"],
     ) -> CampaignAttempt:
         workspace_record = state.workspaces[f"{arm.value}:{task.instance_id}"]
         workspace = _resolve_under_root(self.root, workspace_record.path)
@@ -913,7 +920,7 @@ class Verified10Campaign:
         workspace: Path,
         problem_statement: str,
         started: float,
-        repair_engine: Literal["native", "mini_linear"],
+        repair_engine: Literal["native", "mini_linear", "mini_native"],
     ) -> CampaignAttempt:
         self._active_repair_engine = repair_engine
         self._preflight_agentforge(workspace, task)
@@ -978,7 +985,7 @@ class Verified10Campaign:
         task: Verified10Task,
         state: CampaignState,
         existing: CampaignAttempt,
-        repair_engine: Literal["native", "mini_linear"],
+        repair_engine: Literal["native", "mini_linear", "mini_native"],
     ) -> CampaignAttempt:
         assert existing.run_id is not None
         workspace = _resolve_under_root(

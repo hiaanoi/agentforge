@@ -667,6 +667,35 @@ def test_cli_run_agentforge_accepts_mini_linear_repair_engine(
     assert captured["repair_engine"] == "mini_linear"
 
 
+def test_cli_run_agentforge_accepts_mini_native_repair_engine(
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class Campaign:
+        def __init__(self, protocol: Path, output: Path) -> None:
+            del protocol, output
+
+        def run_agentforge(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    result = main(
+        [
+            "run-agentforge",
+            "--protocol",
+            str(PROTOCOL),
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--repair-engine",
+            "mini_native",
+        ],
+        campaign_factory=Campaign,
+    )
+
+    assert result == 0
+    assert captured["repair_engine"] == "mini_native"
+
+
 def test_cli_prepare_prints_linux_preflight_contract(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

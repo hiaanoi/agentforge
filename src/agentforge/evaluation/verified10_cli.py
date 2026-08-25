@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "run-agentforge":
             item.add_argument(
                 "--repair-engine",
-                choices=("native", "mini_linear"),
+                choices=("native", "mini_linear", "mini_native"),
                 default=None,
             )
             item.add_argument(

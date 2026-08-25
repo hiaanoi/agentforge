@@ -278,6 +278,9 @@ class Prior14CallBaseline(_FrozenModel):
 class Verified10Protocol(_FrozenModel):
     schema_version: Literal[1]
     protocol_name: str = Field(min_length=1, max_length=200)
+    parent_protocol_sha256: str | None = Field(
+        default=None, pattern=SHA256_PATTERN, exclude_if=lambda value: value is None
+    )
     dataset_name: Literal["princeton-nlp/SWE-bench_Verified"]
     dataset_split: Literal["test"]
     dataset_fingerprint: str = Field(min_length=1, max_length=200)
@@ -343,6 +346,9 @@ class Verified10Protocol(_FrozenModel):
                 raise ValueError("dataset_fingerprint does not match the frozen selection")
             if self.source_selection_sha256 != _FROZEN_SOURCE_SELECTION_SHA256:
                 raise ValueError("source_selection_sha256 does not match the frozen selection")
+        elif self.protocol_name == "verified50-openai-gpt54mini-mini-native-canary":
+            if len(self.tasks) != 10 or self.parent_protocol_sha256 is None:
+                raise ValueError("mini-native canary must project ten tasks and name its parent")
         else:
             if self.protocol_name != "verified50-openai-gpt54mini" or len(self.tasks) != 50:
                 raise ValueError("unsupported evaluation protocol")
@@ -358,6 +364,10 @@ class Verified10Protocol(_FrozenModel):
             "verified10-deepseek-flash-pass2": (
                 ("SWE_BENCH_PASS2", 100, 100, 3600, 102),
                 (100, 3600),
+            ),
+            "verified50-openai-gpt54mini-mini-native-canary": (
+                ("SWE_BENCH_PASS1", 50, 80, 1800, 52),
+                (50, 1800),
             ),
         }
         agentforge_expected, mini_expected = expected_budgets.get(

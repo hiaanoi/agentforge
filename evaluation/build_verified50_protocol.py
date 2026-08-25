@@ -22,10 +22,12 @@ def _digest(value: object) -> str:
 
 
 def _rank(selection_key: str, instance_id: str) -> str:
-    return hashlib.sha256(f"{selection_key}\0{instance_id}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{selection_key}\0{instance_id}".encode()).hexdigest()
 
 
-def build(template_path: Path, dataset_arrow: Path, output_path: Path, *, selection_key: str) -> None:
+def build(
+    template_path: Path, dataset_arrow: Path, output_path: Path, *, selection_key: str
+) -> None:
     template = json.loads(template_path.read_text(encoding="utf-8"))
     rows = ipc.open_stream(dataset_arrow).read_all().to_pylist()
     if len(rows) != 500:
@@ -70,13 +72,42 @@ def build(template_path: Path, dataset_arrow: Path, output_path: Path, *, select
     print(f"source_selection_sha256={protocol['source_selection_sha256']}")
 
 
+def build_mini_native_canary(parent_path: Path, output_path: Path) -> None:
+    """Write the deterministic first-ten projection of a frozen 50-task protocol."""
+
+    parent = json.loads(parent_path.read_text(encoding="utf-8"))
+    if parent.get("protocol_name") != "verified50-openai-gpt54mini":
+        raise ValueError("canary parent must be the frozen gpt-5.4-mini 50-task protocol")
+    tasks = parent.get("tasks")
+    if not isinstance(tasks, list) or len(tasks) != 50:
+        raise ValueError("canary parent must contain exactly 50 tasks")
+    canary = dict(parent)
+    canary["protocol_name"] = "verified50-openai-gpt54mini-mini-native-canary"
+    canary["parent_protocol_sha256"] = _digest(parent)
+    canary["tasks"] = tasks[:10]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(canary, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--template", type=Path, required=True)
-    parser.add_argument("--dataset-arrow", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--template", type=Path)
+    parser.add_argument("--dataset-arrow", type=Path)
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--selection-key", default="agentforge-vs-mini-verified-50-v1")
+    parser.add_argument("--canary-parent", type=Path)
+    parser.add_argument("--canary-output", type=Path)
     args = parser.parse_args()
+    if (args.canary_parent is None) != (args.canary_output is None):
+        parser.error("--canary-parent and --canary-output must be supplied together")
+    if args.canary_parent is not None:
+        build_mini_native_canary(args.canary_parent, args.canary_output)
+        return 0
+    if args.template is None or args.dataset_arrow is None or args.output is None:
+        parser.error("--template, --dataset-arrow, and --output are required for 50-task builds")
     build(args.template, args.dataset_arrow, args.output, selection_key=args.selection_key)
     return 0
 
