@@ -91,7 +91,7 @@ class MiniNativeRepairEngine:
             history.append(action_history_item(action))
             result = await self._host.execute(action)
             history.append(_observation_history_item(action, result))
-            if parse_submit_output(result.stdout) is None:
+            if parse_submit_output(_combined_output(result)) is None:
                 return False
             candidate = await self._host.publish(run_id)
             return True
@@ -135,7 +135,7 @@ class MiniNativeRepairEngine:
         history.append(_observation_history_item(action, result))
         candidate = (
             await self._host.publish(action.run_id)
-            if parse_submit_output(result.stdout) is not None
+            if parse_submit_output(_combined_output(result)) is not None
             else None
         )
         await self._host.checkpoint(
@@ -177,19 +177,22 @@ def _to_bash_action(
 
 
 def _observation_history_item(action: RepairAction, result: RepairActionResult) -> JsonValue:
-    output = result.stdout + result.stderr
     return cast(
         JsonValue,
         {
             "kind": "TOOL_RESULT",
             "payload": {
                 "output": format_observation(
-                    {"returncode": result.returncode, "output": output}
+                    {"returncode": result.returncode, "output": _combined_output(result)}
                 )
             },
             "call_id": str(action.action_id),
         },
     )
+
+
+def _combined_output(result: RepairActionResult) -> str:
+    return result.stdout + result.stderr
 
 
 __all__ = ["MiniNativeRepairEngine", "MiniNativeResult"]

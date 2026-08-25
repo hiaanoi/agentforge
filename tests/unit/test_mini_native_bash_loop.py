@@ -22,11 +22,12 @@ from agentforge.repair_engines.mini_native.vendor.bash_protocol import (
 
 
 class _FakeBashHost:
-    def __init__(self) -> None:
+    def __init__(self, *, submit_marker_in_stderr: bool = False) -> None:
         self.requests: list[ModelRequest] = []
         self.actions: list[RepairAction] = []
         self.checkpoints: list[MiniNativeState] = []
         self.publish_calls: list[UUID] = []
+        self._submit_marker_in_stderr = submit_marker_in_stderr
         self._commands = iter(
             (
                 "ls",
@@ -52,12 +53,23 @@ class _FakeBashHost:
 
     async def execute(self, action: RepairAction) -> RepairActionResult:
         self.actions.append(action)
-        output = (
-            "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\ncandidate complete"
-            if action.arguments["command"] == "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
-            else f"observed {action.arguments['command']}"
+        command = action.arguments["command"]
+        if command == "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT":
+            if self._submit_marker_in_stderr:
+                return RepairActionResult(
+                    returncode=0,
+                    stdout="",
+                    stderr="COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\ncandidate complete",
+                    duration_ms=2,
+                )
+            output = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\ncandidate complete"
+        else:
+            output = f"observed {command}"
+        return RepairActionResult(
+            returncode=0,
+            stdout=output,
+            duration_ms=2,
         )
-        return RepairActionResult(returncode=0, stdout=output, duration_ms=2)
 
     async def checkpoint(self, state: MiniNativeState) -> None:
         self.checkpoints.append(state)
@@ -115,6 +127,49 @@ async def test_mini_native_loop_runs_frozen_bash_protocol_and_publishes_submissi
     ]
     assert result.submitted
     assert result.candidate is not None and result.candidate.published
+    assert host.publish_calls == [run_id]
+
+
+@pytest.mark.asyncio
+async def test_mini_native_loop_submits_when_marker_is_on_stderr() -> None:
+    from agentforge.repair_engines.mini_native.loop import MiniNativeRepairEngine
+
+    host = _FakeBashHost(submit_marker_in_stderr=True)
+    host._commands = iter(("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT",))
+    run_id = UUID("00000000-0000-0000-0000-000000000130")
+
+    result = await MiniNativeRepairEngine(host).run(
+        run_id=run_id,
+        task="Repair widget behavior",
+        max_steps=1,
+        working_directory=".",
+    )
+
+    assert result.submitted
+    assert host.publish_calls == [run_id]
+
+
+@pytest.mark.asyncio
+async def test_mini_native_pending_bash_submits_when_marker_is_on_stderr() -> None:
+    from agentforge.repair_engines.mini_native.loop import MiniNativeRepairEngine
+
+    host = _FakeBashHost(submit_marker_in_stderr=True)
+    run_id = UUID("00000000-0000-0000-0000-000000000131")
+    action = RepairAction(
+        run_id=run_id,
+        tool_name="bash",
+        working_directory=".",
+        kind=RepairActionKind.BASH,
+        arguments={"command": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"},
+    )
+
+    result = await MiniNativeRepairEngine(host).resume_pending(
+        action=action,
+        history=[],
+        last_test_passed=False,
+    )
+
+    assert result.submitted
     assert host.publish_calls == [run_id]
 
 
