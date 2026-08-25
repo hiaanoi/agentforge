@@ -93,3 +93,8 @@ def test_classifier_splits_read_test_write_and_other() -> None:
 )
 def test_classifier_recognizes_other_obvious_prefixes(command: str, kind: CommandKind) -> None:
     assert classify_command(command) is kind
+
+
+@pytest.mark.parametrize("command", ["pytestfoo", "git diffx", "lsomething"])
+def test_classifier_requires_complete_command_prefix(command: str) -> None:
+    assert classify_command(command) is CommandKind.OTHER

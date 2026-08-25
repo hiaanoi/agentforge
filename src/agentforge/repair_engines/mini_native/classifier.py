@@ -33,11 +33,23 @@ def classify_command(command: str) -> CommandKind:
     normalized = command.strip().casefold()
     if _IN_PLACE_EDIT.search(normalized) or ">" in normalized or _WRITE_COMMAND.search(normalized):
         return CommandKind.WRITE
-    if normalized.startswith(_TEST_PREFIXES):
+    if _matches_prefix(normalized, _TEST_PREFIXES):
         return CommandKind.TEST
-    if normalized.startswith(_READ_PREFIXES):
+    if _matches_prefix(normalized, _READ_PREFIXES):
         return CommandKind.READ
     return CommandKind.OTHER
+
+
+def _matches_prefix(command: str, prefixes: tuple[str, ...]) -> bool:
+    return any(
+        command == prefix
+        or (
+            command.startswith(prefix)
+            and len(command) > len(prefix)
+            and command[len(prefix)].isspace()
+        )
+        for prefix in prefixes
+    )
 
 
 __all__ = ["CommandKind", "classify_command"]
