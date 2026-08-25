@@ -55,6 +55,7 @@ class RepairAction(BaseModel):
         if update:
             data.update(update)
         data.pop("action_id", None)
+        data.pop("arguments_digest", None)
         return type(self).model_validate(data)
 
     @property

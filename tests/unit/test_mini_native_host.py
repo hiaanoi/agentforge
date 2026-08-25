@@ -97,15 +97,20 @@ def test_identity_binds_action_to_run_and_reordered_args_are_stable() -> None:
         arguments={"content": "y", "path": "x"}, approval_key="approval-1",
     )
     other_run = first.model_copy(update={"run_id": uuid4()})
+    changed_args = first.model_copy(update={"arguments": {"path": "other.py", "content": "y"}})
     assert first.action_id == reordered.action_id
     assert first.approval_binding_digest == reordered.approval_binding_digest
     assert first.approval_binding_digest != other_run.approval_binding_digest
+    assert changed_args.arguments_digest != first.arguments_digest
+    assert changed_args.action_id != first.action_id
 
 
 def test_bound_output_redacts_nested_secrets_and_validates_limit() -> None:
     output, truncated = bound_output("prefix sk-live-secret-value suffix", limit=100)
     assert output == "prefix <redacted> suffix"
     assert not truncated
+    token_output, _ = bound_output("token-live-secret-value", limit=100)
+    assert token_output == "<redacted>"
     stderr, truncated = bound_output("x" * 10, limit=4)
     assert stderr == "xxxx"
     assert truncated

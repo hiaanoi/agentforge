@@ -17,7 +17,10 @@ from agentforge.repair_engines.mini_native.contracts import (
 
 _ACTION_NAMESPACE = UUID("5a4c0d2e-a8a0-4cbb-9fb0-5cc7ec2ad6ed")
 _SECRET_KEY = re.compile(r"(?:api[_-]?key|token|secret|password|authorization|credential)", re.I)
-_SECRET_VALUE = re.compile(r"(?:sk-[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._-]{8,})")
+_SECRET_VALUE = re.compile(
+    r"(?:sk-[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._-]{8,}|token-[A-Za-z0-9._-]{8,})",
+    re.I,
+)
 MAX_OUTPUT_CHARS = 20_000
 
 
