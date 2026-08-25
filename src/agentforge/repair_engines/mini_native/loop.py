@@ -97,6 +97,8 @@ class MiniNativeRepairEngine:
             history.append(_result_history_item(action, result))
             if action.kind is RepairActionKind.TEST:
                 last_test_passed = result.returncode == 0
+            elif action.kind is RepairActionKind.WRITE:
+                last_test_passed = False
             if action.kind is RepairActionKind.FINAL and result.returncode in {None, 0}:
                 candidate = await self._host.publish(run_id)
                 return candidate.published

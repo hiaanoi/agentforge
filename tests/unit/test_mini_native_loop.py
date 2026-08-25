@@ -14,7 +14,8 @@ from agentforge.repair_engines.mini_native.contracts import (
 
 
 class _FakeHost:
-    def __init__(self) -> None:
+    def __init__(self, *, fail_first_test: bool = True) -> None:
+        self._fail_first_test = fail_first_test
         self.requests: list[ModelRequest] = []
         self.actions: list[RepairAction] = []
         self.checkpoints: list[MiniNativeState] = []
@@ -56,7 +57,7 @@ class _FakeHost:
 
     async def execute(self, action: RepairAction) -> RepairActionResult:
         self.actions.append(action)
-        if action.kind is RepairActionKind.TEST and len(
+        if self._fail_first_test and action.kind is RepairActionKind.TEST and len(
             [item for item in self.actions if item.kind is RepairActionKind.TEST]
         ) == 1:
             return RepairActionResult(returncode=1, stdout="FAILED: expected 2, got 1", duration_ms=2)
@@ -97,3 +98,33 @@ async def test_mini_native_loop_retries_after_a_failed_test_before_submission() 
     assert result.candidate.published
     assert host.publish_calls == [run_id]
     assert host.actions[-1].kind is RepairActionKind.FINAL
+
+
+@pytest.mark.asyncio
+async def test_mini_native_loop_requires_a_new_passing_test_after_a_write() -> None:
+    from agentforge.repair_engines.mini_native.loop import MiniNativeRepairEngine
+
+    host = _FakeHost(fail_first_test=False)
+    host._responses = [
+        ToolCall(
+            type="tool_call",
+            tool="run_tests",
+            arguments={"command": "pytest tests/unit/test_widget.py"},
+        ),
+        ToolCall(
+            type="tool_call",
+            tool="edit_file",
+            arguments={"path": "src/widget.py", "content": "unverified fix"},
+        ),
+        FinalAnswer(type="final", answer="submit stale verification"),
+    ]
+
+    with pytest.raises(ValueError, match="passing test"):
+        await MiniNativeRepairEngine(host).run(
+            run_id=UUID("00000000-0000-0000-0000-000000000124"),
+            task="Repair widget behavior",
+            max_steps=3,
+            working_directory=".",
+        )
+
+    assert not host.publish_calls
