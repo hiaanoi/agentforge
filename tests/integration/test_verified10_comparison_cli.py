@@ -696,6 +696,34 @@ def test_cli_run_agentforge_accepts_mini_native_repair_engine(
     assert captured["repair_engine"] == "mini_native"
 
 
+def test_mini_native_canary_projection_is_deterministic(
+    tmp_path: Path,
+) -> None:
+    from evaluation.build_verified50_protocol import build_mini_native_canary
+
+    parent = json.loads(PROTOCOL.read_text(encoding="utf-8"))
+    parent["protocol_name"] = "verified50-openai-gpt54mini"
+    parent["model"] = "gpt-5.4-mini"
+    parent["tasks"] = parent["tasks"] * 5
+    parent_path = tmp_path / "verified50.json"
+    parent_path.write_text(json.dumps(parent), encoding="utf-8")
+    canary_path = tmp_path / "canary.json"
+
+    build_mini_native_canary(parent_path, canary_path)
+    canary = load_verified10_protocol(canary_path)
+    assert canary.protocol_name == "verified50-openai-gpt54mini-mini-native-canary"
+    assert len(canary.tasks) == 10
+    assert canary.tasks == load_verified10_protocol(PROTOCOL).tasks
+    assert canary.parent_protocol_sha256
+    assert canary.model == "gpt-5.4-mini"
+    assert canary.temperature == 0.0
+    assert canary.agentforge_budget.logical_model_calls == 50
+    assert canary.agentforge_budget.run_steps == 80
+    assert canary.mini_budget.step_limit == 50
+    campaign = Verified10Campaign(canary_path, tmp_path / "out")
+    assert campaign._active_repair_engine == "mini_native"
+
+
 def test_cli_prepare_prints_linux_preflight_contract(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -13,7 +13,6 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-import pyarrow.ipc as ipc
 
 
 def _digest(value: object) -> str:
@@ -28,6 +27,8 @@ def _rank(selection_key: str, instance_id: str) -> str:
 def build(
     template_path: Path, dataset_arrow: Path, output_path: Path, *, selection_key: str
 ) -> None:
+    import pyarrow.ipc as ipc
+
     template = json.loads(template_path.read_text(encoding="utf-8"))
     rows = ipc.open_stream(dataset_arrow).read_all().to_pylist()
     if len(rows) != 500:
