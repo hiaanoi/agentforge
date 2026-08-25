@@ -21,6 +21,7 @@ from agentforge.persistence.profile_trust import ProfileKernel
 from agentforge.repair_engines.mini_native.agentforge_host import AgentForgeMiniNativeHost
 from agentforge.repair_engines.mini_native.environment import BashObservation
 from agentforge.repair_engines.models import RepairEngineKind
+from agentforge.runtime.engine import AgentRuntime
 from agentforge.tools.testing.profiles import TestProfileDefinition as ProfileDefinition
 from tests.integration.test_mini_native_runtime import _create_product_run, _request
 
@@ -294,8 +295,52 @@ async def test_nonexact_pytest_command_uses_managed_profile_not_environment(
 
     assert waiting.status is RunStatus.WAITING_APPROVAL
     [approval] = components.runtime.list_pending_approvals(run.run_id)
-    assert approval.tool_name == "run_tests"
-    assert environment.commands == []
+    assert approval.tool_name == "publish_candidate_patch"
+    assert environment.commands == ["echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]
+    assert "not registered" in str(provider.requests[-1].history[-1])
+
+
+@pytest.mark.asyncio
+async def test_consumed_candidate_publication_recovers_as_completed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, workspace, _ = _bash_request(tmp_path)
+    provider = _BashProvider(["echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"])
+    request = replace(request, provider=provider)
+    components = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    environment = _FakeBashEnvironment(workspace)
+    components.runtime._mini_native_environment = environment
+    run = _create_product_run(request, workspace)
+
+    await components.runtime.execute(run.run_id)
+    [candidate_approval] = components.runtime.list_pending_approvals(run.run_id)
+    assert candidate_approval.tool_name == "publish_candidate_patch"
+    components.runtime.approve(candidate_approval.approval_id)
+
+    def interrupt_after_candidate_consumed(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise RuntimeError("interrupt after candidate consumed")
+
+    monkeypatch.setattr(
+        AgentRuntime,
+        "_finish_candidate_publication",
+        interrupt_after_candidate_consumed,
+    )
+    with pytest.raises(RuntimeError, match="interrupt after candidate consumed"):
+        await components.runtime.resume(run.run_id)
+
+    monkeypatch.undo()
+    reopened = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    reopened.runtime._mini_native_environment = environment
+
+    completed = await reopened.runtime.resume(run.run_id)
+
+    assert completed.status is RunStatus.COMPLETED
 
 
 @pytest.mark.asyncio

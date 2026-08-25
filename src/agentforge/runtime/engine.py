@@ -557,25 +557,13 @@ class AgentRuntime:
         if not actual:
             return None
         normalized_actual = self._normalize_test_argv(actual)
-        family = self._test_command_family(normalized_actual)
-        family_match: str | None = None
-        family_score = 0
         for profile in self._test_executions._profiles.list_enabled():
             if profile.purpose is not ProfilePurpose.DEVELOPMENT:
                 continue
             normalized_profile = self._normalize_test_argv(list(profile.argv))
             if normalized_actual == normalized_profile:
                 return profile.profile_id
-            if family is None or family != self._test_command_family(normalized_profile):
-                continue
-            score = max(
-                1,
-                self._common_argv_prefix(normalized_actual, normalized_profile),
-            )
-            if score > family_score:
-                family_match = profile.profile_id
-                family_score = score
-        return family_match
+        return None
 
     @staticmethod
     def _normalize_test_argv(arguments: list[str]) -> tuple[str, ...]:
@@ -586,27 +574,6 @@ class AgentRuntime:
         else:
             normalized[0] = executable
         return tuple(normalized)
-
-    @staticmethod
-    def _test_command_family(arguments: tuple[str, ...]) -> str | None:
-        if arguments[:3] == ("python", "-m", "pytest") or arguments[0].startswith(
-            "pytest"
-        ):
-            return "pytest"
-        if arguments[0] in {"tox", "nox"}:
-            return arguments[0]
-        return None
-
-    @staticmethod
-    def _common_argv_prefix(left: tuple[str, ...], right: tuple[str, ...]) -> int:
-        return next(
-            (
-                index
-                for index, pair in enumerate(zip(left, right, strict=False))
-                if pair[0] != pair[1]
-            ),
-            min(len(left), len(right)),
-        )
 
     @staticmethod
     def _mini_native_action_is_test(action: RepairAction) -> bool:
@@ -893,7 +860,19 @@ class AgentRuntime:
             run_id=run_id,
             step_number=checkpoint.step_number,
         )
-        return snapshot.resume_phase is ResumePhase.READY_FOR_MODEL
+        return (
+            snapshot.resume_phase is ResumePhase.READY_FOR_MODEL
+            and not self._is_consumed_candidate_snapshot(snapshot)
+        )
+
+    def _is_consumed_candidate_snapshot(self, snapshot: RuntimeSnapshotV5) -> bool:
+        if self._approvals is None or snapshot.pending_approval_id is None:
+            return False
+        approval = self._approvals.get(snapshot.pending_approval_id)
+        return (
+            approval.tool_name == "publish_candidate_patch"
+            and approval.consumption_state is ApprovalConsumptionState.CONSUMED
+        )
 
     def _recover_claimed_mini_native_bash(
         self, approval: ApprovalRequest
@@ -988,7 +967,10 @@ class AgentRuntime:
                     run_id=run_id,
                     step_number=checkpoint.step_number,
                 )
-                if snapshot.resume_phase is ResumePhase.READY_FOR_MODEL:
+                if (
+                    snapshot.resume_phase is ResumePhase.READY_FOR_MODEL
+                    and not self._is_consumed_candidate_snapshot(snapshot)
+                ):
                     last_test_passed = (
                         snapshot.mini_native_last_test_passed
                         or (
@@ -1324,7 +1306,9 @@ class AgentRuntime:
         result: ToolResult | None = None,
     ) -> Run:
         successful = approval.status is ApprovalStatus.APPROVED and (
-            result.success if result is not None else approval.result_status == "success"
+            result.success
+            if result is not None
+            else approval.result_status in {"success", "completed"}
         )
         if not successful:
             return self._fail(
