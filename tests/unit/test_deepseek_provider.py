@@ -152,6 +152,16 @@ def test_history_mapper_accepts_generic_runtime_tool_items() -> None:
         "tool_call_id": "call_generic",
         "content": '{"output":"hello"}',
     }
+    top_level_call = DeepSeekModelProvider._map_history_item(
+        {
+            "type": "tool_call",
+            "call_id": "call_top_level",
+            "tool": "read_file",
+            "arguments": {"path": "README.md"},
+        }
+    )
+    assert top_level_call["tool_calls"][0]["function"]["name"] == "read_file"
+    assert top_level_call["tool_calls"][0]["id"] == "call_top_level"
 
 
 @pytest.mark.asyncio

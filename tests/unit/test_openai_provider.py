@@ -53,6 +53,16 @@ def test_history_mapper_accepts_generic_runtime_tool_items() -> None:
     }
     assert result["type"] == "function_call_output"
     assert result["call_id"] == "call_generic"
+    top_level_call = OpenAIModelProvider._map_history_item(
+        {
+            "type": "tool_call",
+            "call_id": "call_top_level",
+            "tool": "read_file",
+            "arguments": {"path": "README.md"},
+        }
+    )
+    assert top_level_call["name"] == "read_file"
+    assert top_level_call["call_id"] == "call_top_level"
 
 
 def request() -> ModelRequest:
