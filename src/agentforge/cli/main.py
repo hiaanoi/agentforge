@@ -41,7 +41,12 @@ from agentforge.domain.enums import ApprovalStatus, RejectionStrategy
 
 def build_application(args: argparse.Namespace) -> AgentApplication:
     config = _load_config(args)
-    return ProductApplicationFactory().build(args.workspace, config=config)
+    return ProductApplicationFactory().build(
+        args.workspace,
+        config=config,
+        mini_native_container=args.mini_native_container,
+        mini_native_container_workspace=args.mini_native_container_workspace,
+    )
 
 
 def _load_config(args: argparse.Namespace) -> ProductConfig:

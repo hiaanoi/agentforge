@@ -57,6 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
                 default=None,
             )
             item.add_argument("--model", default=None)
+            item.add_argument("--task-id", action="append", dest="task_ids")
         if name == "run-mini":
             item.add_argument(
                 "--mini-root", type=Path, default=os.environ.get("MINI_SWE_AGENT_ROOT")
@@ -107,6 +108,8 @@ def main(
                 kwargs["provider_kind"] = args.provider_kind
             if args.model is not None:
                 kwargs["model"] = args.model
+            if args.task_ids is not None:
+                kwargs["task_ids"] = tuple(args.task_ids)
             campaign.run_agentforge(**kwargs)  # type: ignore[attr-defined]
         elif args.command == "run-mini":
             if args.mini_root is None:

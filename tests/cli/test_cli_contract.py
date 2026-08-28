@@ -383,6 +383,45 @@ def test_core_subcommand_has_help(name: str, capsys: pytest.CaptureFixture[str])
     assert "usage:" in captured.out
 
 
+def test_exec_propagates_explicit_mini_native_container_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import agentforge.cli.main as cli_main
+    from agentforge.cli.parser import build_parser
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".agentforge").mkdir()
+    _write_product_config(workspace)
+    captured: dict[str, object] = {}
+
+    class Factory:
+        def build(self, root: Path, **kwargs: object) -> object:
+            captured["workspace"] = root
+            captured.update(kwargs)
+            return object()
+
+    monkeypatch.setattr(cli_main, "ProductApplicationFactory", Factory)
+    args = build_parser().parse_args(
+        (
+            "exec",
+            "--workspace",
+            str(workspace),
+            "--mini-native-container",
+            "task-container-123",
+            "--mini-native-container-workspace",
+            "/testbed",
+            "repair it",
+        )
+    )
+
+    cli_main.build_application(args)
+
+    assert captured["workspace"] == workspace
+    assert captured["mini_native_container"] == "task-container-123"
+    assert captured["mini_native_container_workspace"] == "/testbed"
+
+
 def test_exec_pause_prints_only_stable_identifiers(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -700,6 +700,198 @@ def test_cli_run_agentforge_accepts_mini_native_repair_engine(
     assert captured["repair_engine"] == "mini_native"
 
 
+def test_cli_run_agentforge_accepts_one_task_smoke_selection(
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class Campaign:
+        def __init__(self, protocol: Path, output: Path) -> None:
+            del protocol, output
+
+        def run_agentforge(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    task_id = load_verified10_protocol(PROTOCOL).tasks[0].instance_id
+    result = main(
+        [
+            "run-agentforge",
+            "--protocol",
+            str(PROTOCOL),
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--repair-engine",
+            "mini_native",
+            "--task-id",
+            task_id,
+        ],
+        campaign_factory=Campaign,
+    )
+
+    assert result == 0
+    assert captured["repair_engine"] == "mini_native"
+    assert captured["task_ids"] == (task_id,)
+
+
+def test_mini_native_attempt_uses_pinned_bound_container_and_cleans_up(
+    tmp_path: Path,
+) -> None:
+    protocol = load_verified10_protocol(PROTOCOL)
+    task = protocol.tasks[0]
+    run_id = "00000000-0000-0000-0000-000000000456"
+    container_id = "8f4d2f4a6b2c"
+
+    class MiniNativeRunner(FakeRunner):
+        def run(self, command: CampaignCommand) -> CampaignCommandResult:
+            argv = command.argv
+            if argv[:2] == ("docker", "create") and "--mount" in argv:
+                self.commands.append(command)
+                return CampaignCommandResult(0, container_id + "\n", "")
+            if argv[:2] in {("docker", "start"), ("docker", "rm")}:
+                self.commands.append(command)
+                return CampaignCommandResult(0, "", "")
+            if "agentforge" in argv:
+                self.commands.append(command)
+                action = argv[argv.index("agentforge") + 1]
+                if action == "exec":
+                    return CampaignCommandResult(20, f"run_id={run_id}\n", "")
+                if action == "inspect":
+                    return CampaignCommandResult(
+                        0,
+                        f"run_id={run_id} lifecycle=TERMINAL outcome=UNVERIFIED\n",
+                        "",
+                    )
+                return CampaignCommandResult(0, "", "")
+            return super().run(command)
+
+    class ContractCampaign(Verified10Campaign):
+        def _preflight_agentforge(self, workspace: Path, selected_task: object) -> None:
+            del workspace, selected_task
+
+        def _git_patch(self, workspace: Path, selected_task: object) -> str:
+            del workspace, selected_task
+            return "diff --git a/source.py b/source.py\n"
+
+        @staticmethod
+        def _agentforge_telemetry(workspace: Path, durable_run_id: str) -> dict[str, object]:
+            del workspace, durable_run_id
+            return {
+                "lifecycle": "TERMINAL",
+                "outcome": "UNVERIFIED",
+                "model_calls": 1,
+                "steps": 1,
+                "approval_count": 0,
+                "edit_count": 1,
+                "test_count": 0,
+                "event_count": 3,
+                "unavailable": (),
+            }
+
+    runner = MiniNativeRunner(protocol)
+    campaign = ContractCampaign(PROTOCOL, tmp_path / "out", runner=runner)
+    campaign.prepare()
+    runner.commands.clear()
+
+    campaign.run_agentforge(task_ids=(task.instance_id,), repair_engine="mini_native")
+
+    workspace = tmp_path / "out" / "workspaces" / "agentforge" / task.instance_id
+    digest = campaign._load().workspaces[
+        f"{BenchmarkArm.AGENTFORGE.value}:{task.instance_id}"
+    ].image_digest
+    create = next(
+        command
+        for command in runner.commands
+        if command.argv[:2] == ("docker", "create") and "--mount" in command.argv
+    )
+    assert create.argv == (
+        "docker",
+        "create",
+        "--network",
+        "none",
+        "--workdir",
+        "/testbed",
+        "--mount",
+        f"type=bind,source={workspace},target=/testbed",
+        "--entrypoint",
+        "/bin/bash",
+        digest,
+        "-lc",
+        "while :; do sleep 3600; done",
+    )
+    assert any(
+        command.argv == ("docker", "start", container_id) for command in runner.commands
+    )
+    agentforge_commands = [
+        command for command in runner.commands if "agentforge" in command.argv
+    ]
+    assert agentforge_commands
+    for command in agentforge_commands:
+        container_index = command.argv.index("--mini-native-container")
+        assert command.argv[container_index + 1] == container_id
+        assert command.argv[container_index + 2 : container_index + 4] == (
+            "--mini-native-container-workspace",
+            "/testbed",
+        )
+    assert runner.commands[-1].argv == ("docker", "rm", "--force", container_id)
+
+
+def test_mini_native_attempt_cleans_up_container_after_agentforge_failure(
+    tmp_path: Path,
+) -> None:
+    protocol = load_verified10_protocol(PROTOCOL)
+    task = protocol.tasks[0]
+    container_id = "failed-task-container"
+
+    class FailingRunner(FakeRunner):
+        def run(self, command: CampaignCommand) -> CampaignCommandResult:
+            argv = command.argv
+            if argv[:2] == ("docker", "create") and "--mount" in argv:
+                self.commands.append(command)
+                return CampaignCommandResult(0, container_id + "\n", "")
+            if argv[:2] in {("docker", "start"), ("docker", "rm")}:
+                self.commands.append(command)
+                return CampaignCommandResult(0, "", "")
+            if "agentforge" in argv:
+                self.commands.append(command)
+                action = argv[argv.index("agentforge") + 1]
+                if action == "exec":
+                    return CampaignCommandResult(2, "", "agentforge failed")
+                return CampaignCommandResult(0, "", "")
+            return super().run(command)
+
+    class ContractCampaign(Verified10Campaign):
+        def _preflight_agentforge(self, workspace: Path, selected_task: object) -> None:
+            del workspace, selected_task
+
+    runner = FailingRunner(protocol)
+    campaign = ContractCampaign(PROTOCOL, tmp_path / "out", runner=runner)
+    campaign.prepare()
+    runner.commands.clear()
+
+    campaign.run_agentforge(task_ids=(task.instance_id,), repair_engine="mini_native")
+
+    assert runner.commands[-1].argv == ("docker", "rm", "--force", container_id)
+    state = json.loads((tmp_path / "out" / "campaign-state.json").read_text(encoding="utf-8"))
+    assert state["attempts"][BenchmarkArm.AGENTFORGE.value][0]["status"] == "FAILED"
+
+
+def test_mini_native_failure_export_can_inspect_after_container_cleanup(
+    tmp_path: Path,
+) -> None:
+    protocol = load_verified10_protocol(PROTOCOL)
+    runner = FakeRunner(protocol)
+    campaign = Verified10Campaign(PROTOCOL, tmp_path / "out", runner=runner)
+    campaign._active_repair_engine = "mini_native"
+
+    campaign._inspect_run(
+        tmp_path / "workspace",
+        "00000000-0000-0000-0000-000000000789",
+        export=True,
+    )
+
+    assert "--mini-native-container" not in runner.commands[-1].argv
+
+
 def test_mini_native_canary_projection_is_deterministic(
     tmp_path: Path,
 ) -> None:

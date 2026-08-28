@@ -178,7 +178,14 @@ class ProductApplicationFactory:
     def __init__(self, *, runtime_loader: ProductRuntimeDefinitionLoader | None = None) -> None:
         self._runtime_loader = runtime_loader or ProductRuntimeDefinitionLoader()
 
-    def build(self, workspace: Path, *, config: ProductConfig) -> AgentApplication:
+    def build(
+        self,
+        workspace: Path,
+        *,
+        config: ProductConfig,
+        mini_native_container: str | None = None,
+        mini_native_container_workspace: str | None = None,
+    ) -> AgentApplication:
         root = _safe_workspace(workspace)
         self._validate_database_location(root, config)
         definition = self._runtime_loader.load(root, config=config)
@@ -209,6 +216,8 @@ class ProductApplicationFactory:
                     repair_workflow=workflow,
                     max_output_chars=definition.max_output_chars,
                     repair_engine=definition.repair_engine,
+                    mini_native_container=mini_native_container,
+                    mini_native_container_workspace=mini_native_container_workspace,
                 )
             )
             assembler = ProductStartRunAssembler(

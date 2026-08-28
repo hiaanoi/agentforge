@@ -71,6 +71,8 @@ def _add_workspace_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model")
     parser.add_argument("--max-steps", type=_positive_integer)
     parser.add_argument("--profile-id", action="append", dest="profile_ids")
+    parser.add_argument("--mini-native-container")
+    parser.add_argument("--mini-native-container-workspace")
 
 
 def _positive_integer(value: str) -> int:

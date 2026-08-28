@@ -10,7 +10,8 @@ import stat
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
@@ -97,6 +98,7 @@ class Verified10Campaign:
         )
         self._active_provider_kind: Literal["deepseek", "openai"] = "deepseek"
         self._active_model: str = self.protocol.model
+        self._active_mini_native_container: str | None = None
 
     @staticmethod
     def _safe_root(requested: Path) -> Path:
@@ -630,9 +632,14 @@ class Verified10Campaign:
             if mini_root is None:
                 raise CampaignExecutionError("mini root is required")
             return self._execute_mini(task, mini_root, workspace_record, started)
-        return self._execute_agentforge(
-            task, workspace, state.public_tasks[task.instance_id], started, repair_engine
-        )
+        with self._mini_native_container(
+            workspace,
+            workspace_record.image_digest,
+            repair_engine=repair_engine,
+        ):
+            return self._execute_agentforge(
+                task, workspace, state.public_tasks[task.instance_id], started, repair_engine
+            )
 
     _mini_config = staticmethod(mini_config)
 
@@ -847,6 +854,62 @@ class Verified10Campaign:
     _agentforge_config = staticmethod(agentforge_config)
     _agentforge_runtime = staticmethod(agentforge_runtime)
 
+    @contextmanager
+    def _mini_native_container(
+        self,
+        workspace: Path,
+        image_digest: str,
+        *,
+        repair_engine: Literal["native", "mini_linear", "mini_native"],
+    ) -> Iterator[None]:
+        if repair_engine != "mini_native":
+            yield
+            return
+        mount = f"type=bind,source={workspace},target=/testbed"
+        container = self._run(
+            CampaignCommand(
+                (
+                    "docker",
+                    "create",
+                    "--network",
+                    "none",
+                    "--workdir",
+                    "/testbed",
+                    "--mount",
+                    mount,
+                    "--entrypoint",
+                    "/bin/bash",
+                    image_digest,
+                    "-lc",
+                    "while :; do sleep 3600; done",
+                )
+            ),
+            label="docker create mini-native task container",
+        ).stdout.strip()
+        if not container or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", container) is None:
+            raise CampaignExecutionError("Docker create returned an invalid container identity")
+        failed = False
+        try:
+            self._run(
+                CampaignCommand(("docker", "start", container)),
+                label="docker start mini-native task container",
+            )
+            self._active_mini_native_container = container
+            yield
+        except BaseException:
+            failed = True
+            raise
+        finally:
+            self._active_mini_native_container = None
+            try:
+                self._run(
+                    CampaignCommand(("docker", "rm", "--force", container)),
+                    label="docker remove mini-native task container",
+                )
+            except CampaignExecutionError:
+                if not failed:
+                    raise
+
     def _preflight_agentforge(self, workspace: Path, task: Verified10Task) -> None:
         directory = workspace / ".agentforge"
         directory.mkdir(exist_ok=True)
@@ -896,7 +959,26 @@ class Verified10Campaign:
                 "AgentForge generated configuration is incompatible"
             ) from None
 
-    def _af_common(self, workspace: Path) -> tuple[str, ...]:
+    def _af_common(
+        self,
+        workspace: Path,
+        *,
+        require_mini_native_container: bool = False,
+    ) -> tuple[str, ...]:
+        container_binding: tuple[str, ...] = ()
+        if self._active_repair_engine == "mini_native":
+            if (
+                require_mini_native_container
+                and self._active_mini_native_container is None
+            ):
+                raise CampaignExecutionError("MINI_NATIVE requires a running task container")
+            if self._active_mini_native_container is not None:
+                container_binding = (
+                    "--mini-native-container",
+                    self._active_mini_native_container,
+                    "--mini-native-container-workspace",
+                    "/testbed",
+                )
         return (
             "--workspace",
             str(workspace),
@@ -912,6 +994,7 @@ class Verified10Campaign:
             "default",
             "--profile-id",
             "verify",
+            *container_binding,
         )
 
     def _execute_agentforge(
@@ -924,7 +1007,7 @@ class Verified10Campaign:
     ) -> CampaignAttempt:
         self._active_repair_engine = repair_engine
         self._preflight_agentforge(workspace, task)
-        common = self._af_common(workspace)
+        common = self._af_common(workspace, require_mini_native_container=True)
         for profile, purpose in (
             ("compile", "development"),
             ("default", "development"),
@@ -991,14 +1074,23 @@ class Verified10Campaign:
         workspace = _resolve_under_root(
             self.root, state.workspaces[f"{BenchmarkArm.AGENTFORGE.value}:{task.instance_id}"].path
         )
+        workspace_record = state.workspaces[
+            f"{BenchmarkArm.AGENTFORGE.value}:{task.instance_id}"
+        ]
         started = time.monotonic()
-        inspect = self._inspect_run(workspace, existing.run_id, export=False)
-        final, approvals, transcript = self._drive_agentforge(
-            workspace, existing.run_id, inspect, started
-        )
-        return self._finish_agentforge(
-            task, workspace, existing.run_id, final, approvals, transcript, started
-        )
+        self._active_repair_engine = repair_engine
+        with self._mini_native_container(
+            workspace,
+            workspace_record.image_digest,
+            repair_engine=repair_engine,
+        ):
+            inspect = self._inspect_run(workspace, existing.run_id, export=False)
+            final, approvals, transcript = self._drive_agentforge(
+                workspace, existing.run_id, inspect, started
+            )
+            return self._finish_agentforge(
+                task, workspace, existing.run_id, final, approvals, transcript, started
+            )
 
     def _preserve_failed_agentforge(
         self,
@@ -1069,7 +1161,7 @@ class Verified10Campaign:
         latest: CampaignCommandResult,
         started: float,
     ) -> tuple[CampaignCommandResult, int, str]:
-        common = self._af_common(workspace)
+        common = self._af_common(workspace, require_mini_native_container=True)
         approval_count = 0
         transcript = latest.stdout + latest.stderr
         for _ in range(160):
