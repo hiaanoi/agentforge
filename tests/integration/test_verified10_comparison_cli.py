@@ -803,9 +803,12 @@ def test_mini_native_attempt_uses_pinned_bound_container_and_cleans_up(
         for command in runner.commands
         if command.argv[:2] == ("docker", "create") and "--mount" in command.argv
     )
+    container_name = create.argv[create.argv.index("--name") + 1]
     assert create.argv == (
         "docker",
         "create",
+        "--name",
+        container_name,
         "--network",
         "none",
         "--workdir",
@@ -832,7 +835,7 @@ def test_mini_native_attempt_uses_pinned_bound_container_and_cleans_up(
             "--mini-native-container-workspace",
             "/testbed",
         )
-    assert runner.commands[-1].argv == ("docker", "rm", "--force", container_id)
+    assert runner.commands[-1].argv == ("docker", "rm", "--force", container_name)
 
 
 def test_mini_native_attempt_cleans_up_container_after_agentforge_failure(
@@ -870,9 +873,56 @@ def test_mini_native_attempt_cleans_up_container_after_agentforge_failure(
 
     campaign.run_agentforge(task_ids=(task.instance_id,), repair_engine="mini_native")
 
-    assert runner.commands[-1].argv == ("docker", "rm", "--force", container_id)
+    create = next(
+        command
+        for command in runner.commands
+        if command.argv[:2] == ("docker", "create") and "--mount" in command.argv
+    )
+    container_name = create.argv[create.argv.index("--name") + 1]
+    assert runner.commands[-1].argv == ("docker", "rm", "--force", container_name)
     state = json.loads((tmp_path / "out" / "campaign-state.json").read_text(encoding="utf-8"))
     assert state["attempts"][BenchmarkArm.AGENTFORGE.value][0]["status"] == "FAILED"
+
+
+@pytest.mark.parametrize("create_stdout", ["", "not/a-container:id\n"])
+def test_mini_native_attempt_cleans_up_when_create_identity_is_invalid(
+    tmp_path: Path,
+    create_stdout: str,
+) -> None:
+    protocol = load_verified10_protocol(PROTOCOL)
+    task = protocol.tasks[0]
+
+    class InvalidIdentityRunner(FakeRunner):
+        def run(self, command: CampaignCommand) -> CampaignCommandResult:
+            argv = command.argv
+            if argv[:2] == ("docker", "create") and "--mount" in argv:
+                self.commands.append(command)
+                return CampaignCommandResult(0, create_stdout, "")
+            if argv[:2] == ("docker", "rm"):
+                self.commands.append(command)
+                return CampaignCommandResult(0, "", "")
+            return super().run(command)
+
+    class ContractCampaign(Verified10Campaign):
+        def _preflight_agentforge(self, workspace: Path, selected_task: object) -> None:
+            del workspace, selected_task
+
+    runner = InvalidIdentityRunner(protocol)
+    campaign = ContractCampaign(PROTOCOL, tmp_path / "out", runner=runner)
+    campaign.prepare()
+    runner.commands.clear()
+
+    campaign.run_agentforge(task_ids=(task.instance_id,), repair_engine="mini_native")
+
+    create = next(
+        command
+        for command in runner.commands
+        if command.argv[:2] == ("docker", "create") and "--mount" in command.argv
+    )
+    name_index = create.argv.index("--name")
+    container_name = create.argv[name_index + 1]
+    assert container_name.startswith("agentforge-verified10-")
+    assert runner.commands[-1].argv == ("docker", "rm", "--force", container_name)
 
 
 def test_mini_native_failure_export_can_inspect_after_container_cleanup(

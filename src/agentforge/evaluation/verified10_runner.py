@@ -866,11 +866,14 @@ class Verified10Campaign:
             yield
             return
         mount = f"type=bind,source={workspace},target=/testbed"
+        container_name = f"agentforge-verified10-{uuid4().hex}"
         container = self._run(
             CampaignCommand(
                 (
                     "docker",
                     "create",
+                    "--name",
+                    container_name,
                     "--network",
                     "none",
                     "--workdir",
@@ -886,10 +889,15 @@ class Verified10Campaign:
             ),
             label="docker create mini-native task container",
         ).stdout.strip()
-        if not container or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", container) is None:
-            raise CampaignExecutionError("Docker create returned an invalid container identity")
         failed = False
         try:
+            if (
+                not container
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", container) is None
+            ):
+                raise CampaignExecutionError(
+                    "Docker create returned an invalid container identity"
+                )
             self._run(
                 CampaignCommand(("docker", "start", container)),
                 label="docker start mini-native task container",
@@ -903,7 +911,7 @@ class Verified10Campaign:
             self._active_mini_native_container = None
             try:
                 self._run(
-                    CampaignCommand(("docker", "rm", "--force", container)),
+                    CampaignCommand(("docker", "rm", "--force", container_name)),
                     label="docker remove mini-native task container",
                 )
             except CampaignExecutionError:
