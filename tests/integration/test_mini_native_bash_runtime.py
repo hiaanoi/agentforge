@@ -13,7 +13,8 @@ from agentforge.application.runtime_factory import (
     RuntimeAssemblyRequest,
     RuntimeComponentFactory,
 )
-from agentforge.domain.enums import EventType, RunStatus
+from agentforge.domain.enums import EventType, RunStatus, ToolErrorCode
+from agentforge.domain.models import ToolResult
 from agentforge.domain.repair import RepairTaskPolicy
 from agentforge.models.base import ModelRequest, parse_model_output
 from agentforge.models.domain import ModelResponse
@@ -341,6 +342,60 @@ async def test_consumed_candidate_publication_recovers_as_completed(
     completed = await reopened.runtime.resume(run.run_id)
 
     assert completed.status is RunStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_consumed_failed_candidate_publication_recovers_as_failed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, workspace, _ = _bash_request(tmp_path)
+    provider = _BashProvider(["echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"])
+    request = replace(request, provider=provider)
+    components = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    environment = _FakeBashEnvironment(workspace)
+    components.runtime._mini_native_environment = environment
+    run = _create_product_run(request, workspace)
+
+    await components.runtime.execute(run.run_id)
+    [candidate_approval] = components.runtime.list_pending_approvals(run.run_id)
+    components.runtime.approve(candidate_approval.approval_id)
+    original_execute = components.runtime._tools.execute
+
+    async def fail_approved_candidate(*args: object, **kwargs: object) -> object:
+        if args[1] == "publish_candidate_patch" and kwargs.get("approval") is not None:
+            return ToolResult(
+                success=False,
+                error_type=ToolErrorCode.TOOL_EXECUTION_ERROR,
+                error_message="candidate publication failed",
+            )
+        return await original_execute(*args, **kwargs)
+
+    def interrupt_after_candidate_consumed(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise RuntimeError("interrupt after failed candidate consumed")
+
+    monkeypatch.setattr(components.runtime._tools, "execute", fail_approved_candidate)
+    monkeypatch.setattr(
+        AgentRuntime,
+        "_finish_candidate_publication",
+        interrupt_after_candidate_consumed,
+    )
+    with pytest.raises(RuntimeError, match="interrupt after failed candidate consumed"):
+        await components.runtime.resume(run.run_id)
+
+    monkeypatch.undo()
+    reopened = RuntimeComponentFactory().build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+    reopened.runtime._mini_native_environment = environment
+
+    failed = await reopened.runtime.resume(run.run_id)
+
+    assert failed.status is RunStatus.FAILED
+    assert failed.error_message == "Candidate patch publication was rejected or failed"
 
 
 @pytest.mark.asyncio

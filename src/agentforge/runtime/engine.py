@@ -1306,9 +1306,7 @@ class AgentRuntime:
         result: ToolResult | None = None,
     ) -> Run:
         successful = approval.status is ApprovalStatus.APPROVED and (
-            result.success
-            if result is not None
-            else approval.result_status in {"success", "completed"}
+            result.success if result is not None else approval.result_status == "success"
         )
         if not successful:
             return self._fail(
@@ -1654,10 +1652,13 @@ class AgentRuntime:
             approval.approval_id,
             checkpoint,
             result_status=(
-                "completed"
-                if mini_native_action is not None
-                and approval.status is ApprovalStatus.APPROVED
-                else ("success" if result.success else "rejected")
+                "success"
+                if result.success
+                else (
+                    "failed"
+                    if approval.status is ApprovalStatus.APPROVED
+                    else "rejected"
+                )
             ),
             result_summary=(result.error_message or "Tool completed")[:500],
             authority=self._authority(ownership, run_id),
