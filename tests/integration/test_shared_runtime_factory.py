@@ -32,6 +32,10 @@ from agentforge.persistence.legacy_evaluator import LegacyEvaluatorEventReposito
 from agentforge.persistence.profile_trust import ProfileKernel
 from agentforge.persistence.repair_terminal import RepairStateProvenance
 from agentforge.persistence.repair_workflow import RepairWorkflow
+from agentforge.repair_engines.mini_native.environment import (
+    DockerBashEnvironment,
+    WorkspaceBashEnvironment,
+)
 from agentforge.repair_engines.models import RepairEngineKind
 from agentforge.runtime.repair import RepairCoordinator
 from agentforge.tools.paths import WorkspacePathResolver
@@ -143,6 +147,12 @@ def _request(tmp_path: Path) -> RuntimeAssemblyRequest:
 
 def test_product_and_pilot_use_same_runtime_components(tmp_path: Path) -> None:
     request = _request(tmp_path)
+    environment = WorkspaceBashEnvironment(request.workspace)
+    request = replace(
+        request,
+        repair_engine=RepairEngineKind.MINI_NATIVE,
+        mini_native_environment=environment,
+    )
     product = RuntimeComponentFactory().build(request)
     pilot_factory = PilotRuntimeFactory(
         request.database,
@@ -157,8 +167,11 @@ def test_product_and_pilot_use_same_runtime_components(tmp_path: Path) -> None:
     assert type(product.mutation_coordinator) is type(pilot.mutation_coordinator)
     assert product.tool_names == pilot.tool_names
     assert product.common_binding_digest == pilot.common_binding_digest
+    assert product.runtime._mini_native_environment is environment
+    assert pilot.runtime._mini_native_environment is environment
     assert "git_status" in product.tool_names
     assert "git_log" in product.tool_names
+    assert "publish_candidate_patch" in product.tool_names
 
 
 def test_mini_linear_runtime_exposes_only_the_final_candidate_publish_tool(
@@ -171,6 +184,46 @@ def test_mini_linear_runtime_exposes_only_the_final_candidate_publish_tool(
 
     assert "publish_candidate_patch" in components.tool_names
     assert "publish_candidate_patch" not in RuntimeComponentFactory().build(request).tool_names
+
+
+def test_mini_native_factory_installs_a_workspace_bash_environment_only_for_that_engine(
+    tmp_path: Path,
+) -> None:
+    request = _request(tmp_path)
+    factory = RuntimeComponentFactory()
+
+    native = factory.build(request)
+    mini_linear = factory.build(
+        replace(request, repair_engine=RepairEngineKind.MINI_LINEAR)
+    )
+    mini_native = factory.build(
+        replace(request, repair_engine=RepairEngineKind.MINI_NATIVE)
+    )
+
+    assert native.runtime._mini_native_environment is None
+    assert mini_linear.runtime._mini_native_environment is None
+    assert isinstance(mini_native.runtime._mini_native_environment, WorkspaceBashEnvironment)
+    assert mini_native.runtime._mini_native_environment.workspace == request.workspace
+
+
+def test_mini_native_factory_uses_the_explicit_existing_container_binding(
+    tmp_path: Path,
+) -> None:
+    request = _request(tmp_path)
+
+    components = RuntimeComponentFactory().build(
+        replace(
+            request,
+            repair_engine=RepairEngineKind.MINI_NATIVE,
+            mini_native_container="swebench-task-container",
+            mini_native_container_workspace="/testbed",
+        )
+    )
+
+    environment = components.runtime._mini_native_environment
+    assert isinstance(environment, DockerBashEnvironment)
+    assert environment.container == "swebench-task-container"
+    assert environment.workspace == "/testbed"
 
 
 def test_public_runtime_request_rejects_workflow_injection(tmp_path: Path) -> None:

@@ -40,6 +40,8 @@ from agentforge.persistence.product_tables import (
 )
 from agentforge.persistence.source_revisions import WorkspaceDigester
 from agentforge.persistence.tables import EventRow
+from agentforge.repair_engines.mini_native.environment import BashObservation
+from agentforge.repair_engines.models import RepairEngineKind
 from agentforge.tools.paths import WorkspacePathResolver
 from agentforge.tools.testing.profiles import TestProfileRegistry as ProfileRegistry
 
@@ -64,6 +66,17 @@ ALLOWED_ENV = {
         if name in os.environ
     },
 }
+
+
+class _PilotBashEnvironment:
+    async def execute(
+        self,
+        command: str,
+        *,
+        cwd: str,
+        timeout_seconds: float | None,
+    ) -> BashObservation:
+        raise AssertionError((command, cwd, timeout_seconds))
 
 
 def frozen_protocol(
@@ -289,6 +302,29 @@ def test_factory_assembles_complete_protocol_bound_runtime(tmp_path: Path) -> No
         EvaluationCampaignRepository(database).get_slot(attempt.slot_id).status
         is EvaluationSlotStatus.CLAIMED
     )
+    database.close()
+
+
+def test_pilot_factory_passes_its_mini_native_environment_to_the_shared_runtime(
+    tmp_path: Path,
+) -> None:
+    database = Database.from_path(tmp_path / "pilot.sqlite3")
+    database.create_schema()
+    environment = _PilotBashEnvironment()
+    factory = PilotRuntimeFactory(
+        database,
+        MockEvaluationProviderFactory([]),
+        executable=Path(sys.executable),
+        allowed_env=ALLOWED_ENV,
+        repair_engine=RepairEngineKind.MINI_NATIVE,
+        mini_native_environment=environment,
+    )
+    protocol = frozen_protocol(factory)
+    manifest, _, _, attempt, lease = prepare_attempt(tmp_path, database, protocol)
+
+    execution = factory.prepare(protocol, manifest, attempt, lease)
+
+    assert execution.runtime._mini_native_environment is environment
     database.close()
 
 

@@ -79,6 +79,11 @@ from agentforge.policy.sensitive import SensitiveFilePolicy
 from agentforge.process.base import ProcessTreeSupervisor
 from agentforge.process.managed import ManagedTestExecutionCore
 from agentforge.process.runner import create_process_tree_supervisor
+from agentforge.repair_engines.mini_native.agentforge_host import (
+    BashEnvironmentCallback,
+    MiniNativeBashEnvironment,
+)
+from agentforge.repair_engines.models import RepairEngineKind
 from agentforge.runtime.engine import AgentRuntime
 from agentforge.runtime.repair import RepairCoordinator
 from agentforge.tools.paths import WorkspacePathResolver
@@ -195,6 +200,12 @@ class PilotRuntimeFactory:
         supervisor_factory: Callable[[], ProcessTreeSupervisor] = (
             create_process_tree_supervisor
         ),
+        repair_engine: RepairEngineKind = RepairEngineKind.NATIVE,
+        mini_native_environment: MiniNativeBashEnvironment | BashEnvironmentCallback | None = (
+            None
+        ),
+        mini_native_container: str | None = None,
+        mini_native_container_workspace: str | None = None,
     ) -> None:
         self._database = database
         self._provider_factory = provider_factory
@@ -202,6 +213,10 @@ class PilotRuntimeFactory:
         self._allowed_env = dict(sorted(allowed_env.items()))
         self._prompt_variant = prompt_variant
         self._supervisor_factory = supervisor_factory
+        self._repair_engine = RepairEngineKind(repair_engine)
+        self._mini_native_environment = mini_native_environment
+        self._mini_native_container = mini_native_container
+        self._mini_native_container_workspace = mini_native_container_workspace
 
     @staticmethod
     def build_components(request: RuntimeAssemblyRequest) -> RuntimeComponents:
@@ -362,6 +377,12 @@ class PilotRuntimeFactory:
                 repair_coordinator=repair_coordinator,
                 max_output_chars=manifest.limits["max_output_chars"],
                 supervisor_factory=self._supervisor_factory,
+                repair_engine=self._repair_engine,
+                mini_native_environment=self._mini_native_environment,
+                mini_native_container=self._mini_native_container,
+                mini_native_container_workspace=(
+                    self._mini_native_container_workspace
+                ),
             ),
             approval_workflow=ApprovalWorkflow._evaluator_only_create(self._database),
             mutation_workflow=MutationWorkflow._evaluator_only_create(self._database),
@@ -571,8 +592,8 @@ class PilotRuntimeFactory:
         )
         return environment
 
-    @staticmethod
     def _build_registry(
+        self,
         resolver: WorkspacePathResolver,
         sensitive: SensitiveFilePolicy,
         profiles: TestProfileRegistry,
@@ -588,6 +609,7 @@ class PilotRuntimeFactory:
             resolver,
             profiles,
             policy,
+            repair_engine=self._repair_engine,
             sensitive=sensitive,
         )
         return registry

@@ -48,6 +48,14 @@ from agentforge.policy.repair import RepairPolicyEnforcer
 from agentforge.policy.sensitive import SensitiveFilePolicy
 from agentforge.process.base import ProcessTreeSupervisor
 from agentforge.process.runner import create_process_tree_supervisor
+from agentforge.repair_engines.mini_native.agentforge_host import (
+    BashEnvironmentCallback,
+    MiniNativeBashEnvironment,
+)
+from agentforge.repair_engines.mini_native.environment import (
+    DockerBashEnvironment,
+    WorkspaceBashEnvironment,
+)
 from agentforge.repair_engines.models import RepairEngineKind
 from agentforge.runtime.candidate_patch import (
     CandidatePatchPublisher,
@@ -122,7 +130,10 @@ class RuntimeAssemblyRequest:
     """Explicit inputs to the single product/evaluator Runtime assembly chain.
 
     Evaluator-only setup stays outside this request. In particular, the shared
-    factory never accepts the legacy unbound-source policy.
+    factory never accepts the legacy unbound-source policy. MINI_NATIVE can
+    receive either a ready-to-use bash environment or the identity of an
+    already-running Docker container; image tags are intentionally not an
+    execution binding.
     """
 
     database: Database
@@ -136,6 +147,11 @@ class RuntimeAssemblyRequest:
     repair_workflow: RepairWorkflow
     max_output_chars: int
     repair_engine: RepairEngineKind = RepairEngineKind.NATIVE
+    mini_native_environment: MiniNativeBashEnvironment | BashEnvironmentCallback | None = (
+        None
+    )
+    mini_native_container: str | None = None
+    mini_native_container_workspace: str | None = None
     repair_coordinator: RepairCoordinator | None = None
     supervisor_factory: Callable[[], ProcessTreeSupervisor] = (
         create_process_tree_supervisor
@@ -145,6 +161,21 @@ class RuntimeAssemblyRequest:
     def __post_init__(self) -> None:
         if self.max_output_chars <= 0:
             raise ValueError("Runtime output bound must be positive")
+        if self.mini_native_container_workspace is not None and self.mini_native_container is None:
+            raise ValueError("Mini-native Docker workspace requires an existing container")
+        if self.mini_native_environment is not None and self.mini_native_container is not None:
+            raise ValueError(
+                "Mini-native environment injection cannot also name a Docker container"
+            )
+        if (
+            self.repair_engine is not RepairEngineKind.MINI_NATIVE
+            and (
+                self.mini_native_environment is not None
+                or self.mini_native_container is not None
+                or self.mini_native_container_workspace is not None
+            )
+        ):
+            raise ValueError("Mini-native environment binding requires MINI_NATIVE engine")
         if self.supervisor_identity is None:
             if self.supervisor_factory is not create_process_tree_supervisor:
                 raise ValueError(
@@ -343,6 +374,7 @@ class RuntimeComponentFactory:
                 }
                 else None
             ),
+            mini_native_environment=self._mini_native_environment(request, resolver),
         )
         binding_digest = self._common_binding_digest(
             request,
@@ -408,6 +440,22 @@ class RuntimeComponentFactory:
                 resolver, scanner=ProductWorkspaceScanner(resolver.workspace)
             ),
         )
+
+    @staticmethod
+    def _mini_native_environment(
+        request: RuntimeAssemblyRequest,
+        resolver: WorkspacePathResolver,
+    ) -> MiniNativeBashEnvironment | BashEnvironmentCallback | None:
+        if request.repair_engine is not RepairEngineKind.MINI_NATIVE:
+            return None
+        if request.mini_native_environment is not None:
+            return request.mini_native_environment
+        if request.mini_native_container is not None:
+            return DockerBashEnvironment(
+                request.mini_native_container,
+                workspace=request.mini_native_container_workspace,
+            )
+        return WorkspaceBashEnvironment(resolver.workspace)
 
     @staticmethod
     def build_tool_registry(
